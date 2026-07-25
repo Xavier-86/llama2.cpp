@@ -9,6 +9,7 @@
 - [编译](#编译)
 - [运行](#运行)
 - [量化模型](#量化模型)
+- [分步推理教程](#分步推理教程)
 - [调试](#调试)
 
 ## 文件说明
@@ -21,6 +22,7 @@
 | `tokenizer.bin` | BPE 分词器数据（Llama 2 32K 词表） |
 | `stories15M.bin` / `stories42M.bin` | FP32 模型权重（TinyStories 小模型，来自 [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas)） |
 | `stories*-q32.bin` | int8 量化权重（由 `quantize` 生成，GS=32） |
+| `inference_tutorial/` | 将 FP32 与 int8 推理分解为 12 个可独立验证模块的动手教程 |
 
 注意：`stories*.bin` 权重**不在 git 仓库里**（体积太大）。从 [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) 下载 `stories15M.bin` / `stories42M.bin` 放到本目录即可；`tokenizer.bin` 已包含在仓库中。
 
@@ -90,6 +92,21 @@ c++ -O3 -std=c++17 -o quantize quantize.cpp # 量化转换工具
 实测（Apple Silicon）：58 MB → 16 MB，tok/s 约 138 → 1343。权重读取量降为 1/4 是 decode 提速的主因——这正是"decode 带宽受限"的直接演示。
 
 注意：int8 量化路径对编译器优化级浮点代码生成（FMA 合并、向量化顺序）非常敏感——1 ulp 的激活差异可能在量化取整时翻转一个 int8，进而让贪心解码在某个接近平局的 argmax 处走向不同的（同样合理的）文本。因此不同编译选项下 runq 的具体生成文本可能不同，这是正常现象；FP32 的 run 不受影响。
+
+## 分步推理教程
+
+[`inference_tutorial/`](inference_tutorial/README.md) 是本仓库配套的动手学习路线，
+把两个单文件推理程序拆成 12 个小模块：
+
+1. checkpoint 加载与 BPE 分词
+2. RMSNorm、softmax、matmul、RoPE、attention 与 SwiGLU FFN
+3. 完整 FP32 forward、采样器与生成循环
+4. int8 checkpoint 映射、分组量化、int8 matmul 与量化推理
+
+每个模块都包含概念说明、`main.cpp` 练习模板、`solution.cpp` 参考实现
+以及 golden 输入输出数据。可以逐个实现和对比中间结果，最后再组装成
+完整模型。程序生成的 `out*.txt` 和本地编译出的模块可执行文件已由
+git 忽略，各模块 `data/` 目录中的测试数据仍正常跟踪。
 
 ## 调试
 

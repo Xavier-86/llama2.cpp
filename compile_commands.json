@@ -1,0 +1,17 @@
+[
+    {
+        "directory": "/Users/xumingyuan/learning/llama2_cpp",
+        "command": "/usr/bin/clang++ -fcolor-diagnostics -fansi-escape-codes -std=c++20 -g -O0 -c run.cpp -o run.o",
+        "file": "/Users/xumingyuan/learning/llama2_cpp/run.cpp"
+    },
+    {
+        "directory": "/Users/xumingyuan/learning/llama2_cpp",
+        "command": "/usr/bin/clang++ -fcolor-diagnostics -fansi-escape-codes -std=c++20 -g -O0 -c runq.cpp -o runq.o",
+        "file": "/Users/xumingyuan/learning/llama2_cpp/runq.cpp"
+    },
+    {
+        "directory": "/Users/xumingyuan/learning/llama2_cpp",
+        "command": "/usr/bin/clang++ -fcolor-diagnostics -fansi-escape-codes -std=c++20 -g -O0 -c quantize.cpp -o quantize.o",
+        "file": "/Users/xumingyuan/learning/llama2_cpp/quantize.cpp"
+    }
+]

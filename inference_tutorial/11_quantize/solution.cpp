@@ -1,4 +1,11 @@
-// Inference for Llama-2 Transformer model in modern C++ (C++20), int8 quantized forward pass.
+// 11_quantize — reference solution
+//
+// The final assembly: quantized checkpoint loader + quantize/dequantize +
+// int8 matmul + quantized forward + greedy generation.
+//
+// Build:  c++ -O2 -std=c++20 -o solution solution.cpp
+// Run:    ./solution
+// Verify: use the compare.py commands in README.md.
 //
 // The only difference from run.cpp (the FP32 version) is quantization. Read
 // run.cpp first, then diff against this file to see what quantization changes:
@@ -50,6 +57,7 @@ forward(int token, int pos):
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -782,71 +790,175 @@ void chat(Transformer& transformer, Tokenizer& tokenizer, Sampler& sampler,
 }
 
 // ----------------------------------------------------------------------------
-// CLI
+// Module harness: produce every output described in README.md.
 
-[[noreturn]] void error_usage() {
-    throw std::runtime_error(
-        "Usage:   runq <checkpoint> [options]\n"
-        "Example: runq modelq.bin -n 256 -i \"Once upon a time\"\n"
-        "Options:\n"
-        "  -t <float>  temperature in [0,inf], default 1.0\n"
-        "  -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9\n"
-        "  -s <int>    random seed, default time(NULL)\n"
-        "  -n <int>    number of steps to run for, default 256. 0 = max_seq_len\n"
-        "  -i <string> input prompt\n"
-        "  -z <string> optional path to custom tokenizer\n"
-        "  -m <string> mode: generate|chat, default: generate\n"
-        "  -y <string> (optional) system prompt in chat mode");
+std::vector<float> load_floats(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) { throw std::runtime_error("cannot open " + path); }
+    std::vector<float> values;
+    float value;
+    while (f >> value) { values.push_back(value); }
+    return values;
 }
 
-int main(int argc, char* argv[]) {
-    try {
-        std::string checkpoint_path;
-        std::string tokenizer_path = "tokenizer.bin";
-        float temperature = 1.0f;
-        float topp = 0.9f;
-        int steps = 256;
-        std::string prompt;
-        std::uint64_t rng_seed = 0;
-        std::string mode = "generate";
-        std::string system_prompt;
+std::vector<int> load_ints(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) { throw std::runtime_error("cannot open " + path); }
+    std::vector<int> values;
+    int value;
+    while (f >> value) { values.push_back(value); }
+    return values;
+}
 
-        if (argc >= 2) { checkpoint_path = argv[1]; } else { error_usage(); }
-        for (int i = 2; i < argc; i += 2) {
-            if (i + 1 >= argc) { error_usage(); }
-            std::string flag = argv[i];
-            if (flag.size() != 2 || flag[0] != '-') { error_usage(); }
-            switch (flag[1]) {
-                case 't': temperature = std::atof(argv[i + 1]); break;
-                case 'p': topp = std::atof(argv[i + 1]); break;
-                case 's': rng_seed = std::stoull(argv[i + 1]); break;
-                case 'n': steps = std::atoi(argv[i + 1]); break;
-                case 'i': prompt = argv[i + 1]; break;
-                case 'z': tokenizer_path = argv[i + 1]; break;
-                case 'm': mode = argv[i + 1]; break;
-                case 'y': system_prompt = argv[i + 1]; break;
-                default: error_usage();
+template <typename T, size_t Extent>
+void write_values(const std::string& path, std::span<const T, Extent> values) {
+    std::ofstream f(path);
+    if (!f) { throw std::runtime_error("cannot write " + path); }
+    f << std::scientific << std::setprecision(3);
+    for (const T& value : values) { f << +value << '\n'; }
+}
+
+void write_text(const std::string& path, const std::string& text) {
+    std::ofstream f(path);
+    if (!f) { throw std::runtime_error("cannot write " + path); }
+    f << text;
+}
+
+std::vector<int8_t> to_int8(std::span<const int> values) {
+    std::vector<int8_t> result;
+    result.reserve(values.size());
+    for (int value : values) {
+        if (value < -128 || value > 127) {
+            throw std::runtime_error("int8 input is out of range");
+        }
+        result.push_back(static_cast<int8_t>(value));
+    }
+    return result;
+}
+
+int main() {
+    try {
+        const std::string checkpoint_path = "../../stories15M-q32.bin";
+        const std::string tokenizer_path = "../../tokenizer.bin";
+
+        // 11.1: checkpoint header and mapped-weight summary.
+        Transformer transformer(checkpoint_path);
+        const Config& p = transformer.config;
+        const TransformerWeights& w = transformer.weights;
+        const std::array config_values{
+            p.dim, p.hidden_dim, p.n_layers, p.n_heads,
+            p.n_kv_heads, p.vocab_size, p.seq_len, transformer.GS,
+        };
+        write_values("out_config.txt", std::span{config_values});
+
+        std::vector<double> summary;
+        auto summarize_fp32 = [&summary](std::span<const float> tensor) {
+            double sum = 0.0;
+            for (float value : tensor) { sum += value; }
+            summary.push_back(static_cast<double>(tensor.size()));
+            summary.push_back(tensor.front());
+            summary.push_back(sum);
+        };
+        summarize_fp32(w.rms_att_weight);
+        summarize_fp32(w.rms_ffn_weight);
+        summarize_fp32(w.rms_final_weight);
+
+        auto summarize_quantized =
+            [&summary](const std::vector<QuantizedTensor>& tensors) {
+                std::int64_t q_size = 0;
+                std::int64_t q_sum = 0;
+                std::int64_t s_size = 0;
+                for (const QuantizedTensor& tensor : tensors) {
+                    q_size += static_cast<std::int64_t>(tensor.q.size());
+                    s_size += static_cast<std::int64_t>(tensor.s.size());
+                    for (int8_t value : tensor.q) { q_sum += value; }
+                }
+                summary.push_back(static_cast<double>(q_size));
+                summary.push_back(tensors.front().q.front());
+                summary.push_back(static_cast<double>(q_sum));
+                summary.push_back(static_cast<double>(s_size));
+                summary.push_back(tensors.front().s.front());
+            };
+        summarize_quantized(w.q_tokens);
+        summarize_quantized(w.wq);
+        summarize_quantized(w.wk);
+        summarize_quantized(w.wv);
+        summarize_quantized(w.wo);
+        summarize_quantized(w.w1);
+        summarize_quantized(w.w2);
+        summarize_quantized(w.w3);
+        write_values("out_summary.txt", std::span<const double>{summary});
+
+        // 11.2: quantize and dequantize the supplied 64-value vector.
+        const std::vector<float> input_x = load_floats("data/input_x.txt");
+        if (input_x.size() % static_cast<size_t>(transformer.GS) != 0) {
+            throw std::runtime_error("input_x size must be divisible by GS");
+        }
+        std::vector<int8_t> q(input_x.size());
+        std::vector<float> scales(input_x.size() / transformer.GS);
+        QuantizedTensor qx{q, scales};
+        quantize(qx, input_x);
+        std::vector<float> deq(input_x.size());
+        dequantize(qx, deq);
+        write_values("out_q.txt", std::span<const int8_t>{q});
+        write_values("out_s.txt", std::span<const float>{scales});
+        write_values("out_deq.txt", std::span<const float>{deq});
+
+        // 11.3: standalone int8 matmul (this fixture deliberately uses GS=4).
+        const std::vector<int> wq_input = load_ints("data/input_matmul_wq.txt");
+        const std::vector<int> xq_input = load_ints("data/input_matmul_xq.txt");
+        std::vector<int8_t> mat_wq = to_int8(wq_input);
+        std::vector<int8_t> mat_xq = to_int8(xq_input);
+        std::vector<float> mat_ws = load_floats("data/input_matmul_ws.txt");
+        std::vector<float> mat_xs = load_floats("data/input_matmul_xs.txt");
+        if (mat_xq.empty() || mat_wq.size() % mat_xq.size() != 0) {
+            throw std::runtime_error("bad standalone matmul dimensions");
+        }
+        std::vector<float> mat_out(mat_wq.size() / mat_xq.size());
+        QuantizedTensor mat_w{mat_wq, mat_ws};
+        QuantizedTensor mat_x{mat_xq, mat_xs};
+        matmul(mat_out, mat_x, mat_w);
+        write_values("out_matmul.txt", std::span<const float>{mat_out});
+
+        // 11.4: quantized forward over the five prompt tokens.
+        const std::vector<int> tokens = load_ints("data/input_tokens.txt");
+        std::vector<int> argmaxes;
+        std::vector<float> last_logits;
+        for (size_t pos = 0; pos < tokens.size(); pos++) {
+            const std::span<float> logits =
+                transformer.forward(tokens[pos], static_cast<int>(pos));
+            argmaxes.push_back(
+                static_cast<int>(std::ranges::max_element(logits) - logits.begin()));
+            if (pos + 1 == tokens.size()) {
+                last_logits.assign(logits.begin(), logits.end());
             }
         }
+        write_values("out_argmax.txt", std::span<const int>{argmaxes});
+        write_values("out_logits.txt", std::span<const float>{last_logits});
 
-        if (rng_seed == 0) { rng_seed = static_cast<std::uint64_t>(std::time(nullptr)); }
-        if (temperature < 0.0) { temperature = 0.0; }
-        if (topp < 0.0 || 1.0 < topp) { topp = 0.9; }
-        if (steps < 0) { steps = 0; }
-
-        Transformer transformer(checkpoint_path);
-        if (steps == 0 || steps > transformer.config.seq_len) { steps = transformer.config.seq_len; }
-
+        // Start from a fresh cache and run the complete greedy generation loop.
+        Transformer generator(checkpoint_path);
         Tokenizer tokenizer(tokenizer_path, transformer.config.vocab_size);
-        Sampler sampler(transformer.config.vocab_size, temperature, topp, rng_seed);
-
-        if (mode == "generate") {
-            generate(transformer, tokenizer, sampler, prompt, steps);
-        } else if (mode == "chat") {
-            chat(transformer, tokenizer, sampler, prompt, system_prompt, steps);
-        } else {
-            throw std::runtime_error("unknown mode: " + mode);
+        Sampler sampler(transformer.config.vocab_size, 0.0f, 0.9f, 42);
+        const std::vector<int> prompt_tokens =
+            tokenizer.encode("Once upon a time", /*bos=*/true, /*eos=*/false);
+        std::vector<int> generated_ids;
+        std::string generated_text;
+        int token = prompt_tokens.front();
+        for (int pos = 0; pos < 64; pos++) {
+            std::span<float> logits = generator.forward(token, pos);
+            const int next = pos < static_cast<int>(prompt_tokens.size()) - 1
+                                 ? prompt_tokens[pos + 1]
+                                 : sampler.sample(logits);
+            if (next == 1) { break; }
+            generated_ids.push_back(next);
+            generated_text += tokenizer.decode(token, next);
+            token = next;
         }
+        write_values("out_ids.txt", std::span<const int>{generated_ids});
+        write_text("out_text.txt", generated_text + '\n');
+
+        std::cout << "wrote checkpoint, kernel, forward, and generation outputs\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << '\n';

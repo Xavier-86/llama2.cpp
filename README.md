@@ -9,6 +9,7 @@
 - [Build](#build)
 - [Run](#run)
 - [Quantized Models](#quantized-models)
+- [Step-by-Step Inference Tutorial](#step-by-step-inference-tutorial)
 - [Debugging](#debugging)
 
 ## Files
@@ -21,6 +22,7 @@
 | `tokenizer.bin` | BPE tokenizer data (Llama 2 32K vocab) |
 | `stories15M.bin` / `stories42M.bin` | FP32 model weights (TinyStories models from [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas)) |
 | `stories*-q32.bin` | int8 quantized weights (produced by `quantize`, GS=32) |
+| `inference_tutorial/` | Step-by-step tutorial that decomposes FP32 and int8 inference into 12 independently verifiable modules |
 
 Note: the `stories*.bin` weights are **not tracked in git** (too large). Download `stories15M.bin` / `stories42M.bin` from [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) and place them in this directory; `tokenizer.bin` is included in the repo.
 
@@ -90,6 +92,24 @@ Convert an FP32 checkpoint to int8 (the group size must divide every weight dime
 Measured on Apple Silicon: 58 MB → 16 MB, tok/s roughly 138 → 1343. Cutting weight reads to 1/4 is the main reason decode gets faster — a direct demonstration that decode is memory-bandwidth bound.
 
 Note: the int8 quantized path is very sensitive to the compiler's optimization-level floating-point codegen (FMA contraction, vectorized reduction order) — a 1-ulp difference in an activation can flip an int8 rounding, which in turn can send greedy decoding down a different (equally valid) text at some near-tie argmax. So the exact text runq generates may differ across compile options; this is expected. FP32 run is not affected.
+
+## Step-by-Step Inference Tutorial
+
+[`inference_tutorial/`](inference_tutorial/README.md) is the hands-on learning path for
+this repository. It decomposes the two all-in-one inference programs into 12
+small modules:
+
+1. checkpoint loading and BPE tokenization
+2. RMSNorm, softmax, matmul, RoPE, attention, and SwiGLU FFN
+3. the complete FP32 forward pass, sampler, and generation loop
+4. int8 checkpoint mapping, group quantization, int8 matmul, and quantized inference
+
+Every module contains a concept guide, a `main.cpp` exercise template, a
+`solution.cpp` reference implementation, and golden input/output data. This
+lets you implement one piece at a time and compare its output before assembling
+the complete model. Generated `out*.txt` files and locally compiled module
+executables are ignored by git; files under each module's `data/` directory
+remain versioned.
 
 ## Debugging
 

@@ -1,0 +1,10 @@
+# Module programs write their comparison results beside the source files.
+**/out*.txt
+
+# Local executables built from main.cpp / solution.cpp.
+**/main
+**/solution
+
+# Golden-data generator executables (the .cpp sources remain tracked).
+/tools/dump_fp32
+/tools/dump_int8

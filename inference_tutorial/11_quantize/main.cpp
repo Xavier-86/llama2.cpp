@@ -1,4 +1,12 @@
-// Inference for Llama-2 Transformer model in modern C++ (C++20), int8 quantized forward pass.
+// 11_quantize — student template
+//
+// Upgrade the completed FP32 pipeline from module 10 to int8. Tokenizer,
+// sampler, attention, and generation are already filled in; implement the four
+// quantization-specific tasks marked TODO(task N).
+//
+// Build:  c++ -O2 -std=c++20 -o main main.cpp
+// Run:    ./main
+// Verify: use the compare.py commands in README.md.
 //
 // The only difference from run.cpp (the FP32 version) is quantization. Read
 // run.cpp first, then diff against this file to see what quantization changes:
@@ -50,6 +58,7 @@ forward(int token, int pos):
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -204,39 +213,33 @@ private:
 
 // dequantize: float = int8 * scale
 void dequantize(const QuantizedTensor& qx, std::span<float> x) {
-    const size_t GS = qx.q.size() / qx.s.size();
-    for (size_t i = 0; i < x.size(); i++) {
-        x[i] = qx.q[i] * qx.s[i / GS];
-    }
+    (void)qx;
+    std::ranges::fill(x, 0.0f);
+    // TODO(task 2a): recover each float with q[i] * s[i / GS].
+    // Derive GS from the two span sizes; do not hardcode 32 because the
+    // standalone matmul fixture uses GS=4.
 }
 
 // quantize: groups of GS elements; scale = max absolute value in the group (symmetric quantization, range [-127, 127])
 void quantize(QuantizedTensor& qx, std::span<const float> x) {
-    const size_t GS = qx.q.size() / qx.s.size();
-    constexpr float Q_MAX = 127.0f;
-    for (size_t group = 0; group < qx.s.size(); group++) {
-        const std::span x_group = x.subspan(group * GS, GS);
-        float wmax = 0.0f;
-        for (float v : x_group) { wmax = std::max(wmax, std::fabs(v)); }
-        const float scale = wmax / Q_MAX;
-        qx.s[group] = scale;
-        for (size_t i = 0; i < GS; i++) {
-            qx.q[group * GS + i] = static_cast<int8_t>(std::round(x_group[i] / scale));
-        }
-    }
+    (void)qx;
+    (void)x;
+    // TODO(task 2b): for every GS-sized group:
+    //   scale = max(abs(group)) / 127
+    //   q[i] = round(x[i] / scale)
+    // Store one scale per group. std::round is half-away-from-zero.
 }
 
 // carve n quantized tensors of size_each elements out of the mmap region (layout: int8 values first, then float scale factors)
 void init_quantized_tensors(void*& ptr, int n, int size_each, int GS, std::vector<QuantizedTensor>& out) {
-    char* p = static_cast<char*>(ptr);
-    out.resize(n);
-    for (QuantizedTensor& t : out) {
-        t.q = {reinterpret_cast<int8_t*>(p), static_cast<size_t>(size_each)};
-        p += size_each;
-        t.s = {reinterpret_cast<float*>(p), static_cast<size_t>(size_each / GS)};
-        p += sizeof(float) * (size_each / GS);
-    }
-    ptr = p;
+    (void)ptr;
+    (void)n;
+    (void)size_each;
+    (void)GS;
+    (void)out;
+    // TODO(task 1a): carve n tensors from the byte pointer. Each tensor is
+    // [size_each int8 q values][size_each / GS float scales]. Advance ptr
+    // after every q region and scale region.
 }
 
 struct Transformer {
@@ -259,41 +262,13 @@ public:
 
 private:
     void map_weights(void* ptr) {
-        const Config& p = config;
-        const int head_size = p.dim / p.n_heads;
-        const std::uint64_t n_layers = p.n_layers;
-        // first the rmsnorm weights, which stay fp32
-        float* fptr = static_cast<float*>(ptr);
-        auto carve_fp32 = [&fptr](std::uint64_t count) {
-            std::span<float> slice{fptr, static_cast<size_t>(count)};
-            fptr += count;
-            return slice;
-        };
-        weights.rms_att_weight = carve_fp32(n_layers * p.dim);
-        weights.rms_ffn_weight = carve_fp32(n_layers * p.dim);
-        weights.rms_final_weight = carve_fp32(p.dim);
-
-        // then the quantized weights; the embedding is dequantized into an fp32 copy at load time (for lookup, avoiding per-step dequantize)
-        ptr = fptr;
-        init_quantized_tensors(ptr, 1, p.vocab_size * p.dim, GS, weights.q_tokens);
-        weights.token_embedding_table.resize(static_cast<size_t>(p.vocab_size) * p.dim);
-        dequantize(weights.q_tokens[0], weights.token_embedding_table);
-
-        init_quantized_tensors(ptr, p.n_layers, p.dim * (p.n_heads * head_size), GS, weights.wq);
-        init_quantized_tensors(ptr, p.n_layers, p.dim * (p.n_kv_heads * head_size), GS, weights.wk);
-        init_quantized_tensors(ptr, p.n_layers, p.dim * (p.n_kv_heads * head_size), GS, weights.wv);
-        init_quantized_tensors(ptr, p.n_layers, (p.n_heads * head_size) * p.dim, GS, weights.wo);
-
-        init_quantized_tensors(ptr, p.n_layers, p.dim * p.hidden_dim, GS, weights.w1);
-        init_quantized_tensors(ptr, p.n_layers, p.hidden_dim * p.dim, GS, weights.w2);
-        init_quantized_tensors(ptr, p.n_layers, p.dim * p.hidden_dim, GS, weights.w3);
-
-        if (mapped_.shared_classifier) {
-            weights.wcls = weights.q_tokens[0];
-        } else {
-            init_quantized_tensors(ptr, 1, p.dim * p.vocab_size, GS, weights.wcls_storage);
-            weights.wcls = weights.wcls_storage[0];
-        }
+        (void)ptr;
+        // TODO(task 1b): map the checkpoint weight region in README order:
+        //   fp32: rms_att, rms_ffn, rms_final
+        //   int8: q_tokens, wq, wk, wv, wo, w1, w2, w3, optional wcls
+        // Use init_quantized_tensors for the int8 tensors. Dequantize q_tokens
+        // once into token_embedding_table. If the classifier is shared, make
+        // wcls alias q_tokens[0].
     }
 };
 
@@ -326,128 +301,26 @@ void softmax(std::span<float> x) {
 //   - only at the end of each group is the result scaled back to float by x's and w's scale factors
 //   - weight reads are 1/4 of the fp32 version (int8 vs float32); in a bandwidth-bound setting this is the speedup
 void matmul(std::span<float> xout, const QuantizedTensor& x, const QuantizedTensor& w) {
-    const int n = static_cast<int>(x.q.size());
-    const int d = static_cast<int>(xout.size());
-    const int GS = static_cast<int>(w.q.size() / w.s.size());
-    #pragma omp parallel for
-    for (int i = 0; i < d; i++) {
-        float val = 0.0f;
-        std::int32_t ival = 0;
-        const int in = i * n;
-        for (int j = 0; j <= n - GS; j += GS) {
-            for (int k = 0; k < GS; k++) {
-                ival += static_cast<std::int32_t>(x.q[j + k]) * static_cast<std::int32_t>(w.q[in + j + k]);
-            }
-            val += static_cast<float>(ival) * w.s[(in + j) / GS] * x.s[j / GS];
-            ival = 0;
-        }
-        xout[i] = val;
-    }
+    (void)x;
+    (void)w;
+    std::ranges::fill(xout, 0.0f);
+    // TODO(task 3): W(d,n) @ x(n). Accumulate each GS-sized group into an
+    // int32, then add group_sum * w_scale * x_scale to the float row result.
+    // Reset the integer accumulator at each group boundary.
 }
 
 std::span<float> Transformer::forward(int token, int pos) {
-    const Config& p = config;
-    TransformerWeights& w = weights;
-    RunState& s = state;
-    const int dim = p.dim;
-    const int kvd = kv_dim(p);
-    const int kv_mul = p.n_heads / p.n_kv_heads;
-    const int hidden_dim = p.hidden_dim;
-    const int head_size = dim / p.n_heads;
-
-    std::span<float> x{s.x};
-    std::ranges::copy(std::span{w.token_embedding_table}.subspan(static_cast<size_t>(token) * dim, dim),
-                      x.begin());
-
-    for (int l = 0; l < p.n_layers; l++) {
-        const size_t loff = static_cast<size_t>(l) * p.seq_len * kvd;
-
-        // k/v are views into the KV cache at this layer and position: projections write
-        // straight into the cache, and attention reads all history positions back from it
-        std::span<float> k = std::span{s.key_cache}.subspan(loff + static_cast<size_t>(pos) * kvd, kvd);
-        std::span<float> v = std::span{s.value_cache}.subspan(loff + static_cast<size_t>(pos) * kvd, kvd);
-
-        // qkv projections: quantize the activation first, then int8 matmul
-        rmsnorm(s.xb, x, w.rms_att_weight.subspan(static_cast<size_t>(l) * dim, dim));
-        quantize(s.xq, s.xb);
-        matmul(s.q, s.xq, w.wq[l]);
-        matmul(k, s.xq, w.wk[l]);
-        matmul(v, s.xq, w.wv[l]);
-
-        // RoPE rotary position embedding (directly on the cached k row)
-        for (int i = 0; i < dim; i += 2) {
-            const int head_dim = i % head_size;
-            const float freq = 1.0f / std::pow(10000.0f, head_dim / static_cast<float>(head_size));
-            const float val = pos * freq;
-            const float fcr = std::cos(val);
-            const float fci = std::sin(val);
-            const int rotn = i < kvd ? 2 : 1;
-            for (int rot = 0; rot < rotn; rot++) {
-                std::span<float> vec = rot == 0 ? std::span{s.q} : k;
-                const float v0 = vec[i];
-                const float v1 = vec[i + 1];
-                vec[i]     = v0 * fcr - v1 * fci;
-                vec[i + 1] = v0 * fci + v1 * fcr;
-            }
-        }
-
-        // multihead attention
-        #pragma omp parallel for
-        for (int h = 0; h < p.n_heads; h++) {
-            std::span qh = std::span{s.q}.subspan(static_cast<size_t>(h) * head_size, head_size);
-            std::span att = std::span{s.att}.subspan(static_cast<size_t>(h) * p.seq_len,
-                                                     static_cast<size_t>(pos) + 1);
-            for (int t = 0; t <= pos; t++) {
-                std::span key = std::span{s.key_cache}.subspan(
-                    loff + static_cast<size_t>(t) * kvd + (h / kv_mul) * head_size, head_size);
-                float score = 0.0f;
-                for (int i = 0; i < head_size; i++) { score += qh[i] * key[i]; }
-                score /= std::sqrt(static_cast<float>(head_size));
-                att[t] = score;
-            }
-
-            softmax(att);
-
-            std::span xb = std::span{s.xb}.subspan(static_cast<size_t>(h) * head_size, head_size);
-            std::ranges::fill(xb, 0.0f);
-            for (int t = 0; t <= pos; t++) {
-                std::span val = std::span{s.value_cache}.subspan(
-                    loff + static_cast<size_t>(t) * kvd + (h / kv_mul) * head_size, head_size);
-                const float a = att[t];
-                for (int i = 0; i < head_size; i++) { xb[i] += a * val[i]; }
-            }
-        }
-
-        // attention output projection + residual
-        quantize(s.xq, s.xb);
-        matmul(s.xb2, s.xq, w.wo[l]);
-        for (int i = 0; i < dim; i++) { x[i] += s.xb2[i]; }
-
-        rmsnorm(s.xb, x, w.rms_ffn_weight.subspan(static_cast<size_t>(l) * dim, dim));
-
-        // FFN: w2(silu(w1(x)) * w3(x))
-        quantize(s.xq, s.xb);
-        matmul(s.hb, s.xq, w.w1[l]);
-        matmul(s.hb2, s.xq, w.w3[l]);
-
-        // SwiGLU
-        for (int i = 0; i < hidden_dim; i++) {
-            float val = s.hb[i];
-            val *= (1.0f / (1.0f + std::exp(-val)));
-            val *= s.hb2[i];
-            s.hb[i] = val;
-        }
-
-        quantize(s.hq, s.hb);
-        matmul(s.xb, s.hq, w.w2[l]);
-        for (int i = 0; i < dim; i++) { x[i] += s.xb[i]; } // residual
-    }
-
-    rmsnorm(x, x, w.rms_final_weight);
-
-    quantize(s.xq, x);
-    matmul(s.logits, s.xq, w.wcls);
-    return s.logits;
+    (void)token;
+    (void)pos;
+    // TODO(task 4): port module 08's forward pass. Before every matmul,
+    // quantize its *current* FP32 activation:
+    //   rmsnorm xb -> quantize xq -> Wq/Wk/Wv
+    //   attention xb -> quantize xq -> Wo
+    //   rmsnorm xb -> quantize xq -> W1/W3
+    //   SwiGLU hb -> quantize hq -> W2
+    //   final rmsnorm x -> quantize xq -> Wcls
+    // RoPE, attention, residuals, RMSNorm, and SwiGLU stay FP32.
+    return state.logits;
 }
 
 // ----------------------------------------------------------------------------
@@ -782,71 +655,175 @@ void chat(Transformer& transformer, Tokenizer& tokenizer, Sampler& sampler,
 }
 
 // ----------------------------------------------------------------------------
-// CLI
+// Module harness: produce every output described in README.md.
 
-[[noreturn]] void error_usage() {
-    throw std::runtime_error(
-        "Usage:   runq <checkpoint> [options]\n"
-        "Example: runq modelq.bin -n 256 -i \"Once upon a time\"\n"
-        "Options:\n"
-        "  -t <float>  temperature in [0,inf], default 1.0\n"
-        "  -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9\n"
-        "  -s <int>    random seed, default time(NULL)\n"
-        "  -n <int>    number of steps to run for, default 256. 0 = max_seq_len\n"
-        "  -i <string> input prompt\n"
-        "  -z <string> optional path to custom tokenizer\n"
-        "  -m <string> mode: generate|chat, default: generate\n"
-        "  -y <string> (optional) system prompt in chat mode");
+std::vector<float> load_floats(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) { throw std::runtime_error("cannot open " + path); }
+    std::vector<float> values;
+    float value;
+    while (f >> value) { values.push_back(value); }
+    return values;
 }
 
-int main(int argc, char* argv[]) {
-    try {
-        std::string checkpoint_path;
-        std::string tokenizer_path = "tokenizer.bin";
-        float temperature = 1.0f;
-        float topp = 0.9f;
-        int steps = 256;
-        std::string prompt;
-        std::uint64_t rng_seed = 0;
-        std::string mode = "generate";
-        std::string system_prompt;
+std::vector<int> load_ints(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) { throw std::runtime_error("cannot open " + path); }
+    std::vector<int> values;
+    int value;
+    while (f >> value) { values.push_back(value); }
+    return values;
+}
 
-        if (argc >= 2) { checkpoint_path = argv[1]; } else { error_usage(); }
-        for (int i = 2; i < argc; i += 2) {
-            if (i + 1 >= argc) { error_usage(); }
-            std::string flag = argv[i];
-            if (flag.size() != 2 || flag[0] != '-') { error_usage(); }
-            switch (flag[1]) {
-                case 't': temperature = std::atof(argv[i + 1]); break;
-                case 'p': topp = std::atof(argv[i + 1]); break;
-                case 's': rng_seed = std::stoull(argv[i + 1]); break;
-                case 'n': steps = std::atoi(argv[i + 1]); break;
-                case 'i': prompt = argv[i + 1]; break;
-                case 'z': tokenizer_path = argv[i + 1]; break;
-                case 'm': mode = argv[i + 1]; break;
-                case 'y': system_prompt = argv[i + 1]; break;
-                default: error_usage();
+template <typename T, size_t Extent>
+void write_values(const std::string& path, std::span<const T, Extent> values) {
+    std::ofstream f(path);
+    if (!f) { throw std::runtime_error("cannot write " + path); }
+    f << std::scientific << std::setprecision(3);
+    for (const T& value : values) { f << +value << '\n'; }
+}
+
+void write_text(const std::string& path, const std::string& text) {
+    std::ofstream f(path);
+    if (!f) { throw std::runtime_error("cannot write " + path); }
+    f << text;
+}
+
+std::vector<int8_t> to_int8(std::span<const int> values) {
+    std::vector<int8_t> result;
+    result.reserve(values.size());
+    for (int value : values) {
+        if (value < -128 || value > 127) {
+            throw std::runtime_error("int8 input is out of range");
+        }
+        result.push_back(static_cast<int8_t>(value));
+    }
+    return result;
+}
+
+int main() {
+    try {
+        const std::string checkpoint_path = "../../stories15M-q32.bin";
+        const std::string tokenizer_path = "../../tokenizer.bin";
+
+        // 11.1: checkpoint header and mapped-weight summary.
+        Transformer transformer(checkpoint_path);
+        const Config& p = transformer.config;
+        const TransformerWeights& w = transformer.weights;
+        const std::array config_values{
+            p.dim, p.hidden_dim, p.n_layers, p.n_heads,
+            p.n_kv_heads, p.vocab_size, p.seq_len, transformer.GS,
+        };
+        write_values("out_config.txt", std::span{config_values});
+
+        std::vector<double> summary;
+        auto summarize_fp32 = [&summary](std::span<const float> tensor) {
+            double sum = 0.0;
+            for (float value : tensor) { sum += value; }
+            summary.push_back(static_cast<double>(tensor.size()));
+            summary.push_back(tensor.front());
+            summary.push_back(sum);
+        };
+        summarize_fp32(w.rms_att_weight);
+        summarize_fp32(w.rms_ffn_weight);
+        summarize_fp32(w.rms_final_weight);
+
+        auto summarize_quantized =
+            [&summary](const std::vector<QuantizedTensor>& tensors) {
+                std::int64_t q_size = 0;
+                std::int64_t q_sum = 0;
+                std::int64_t s_size = 0;
+                for (const QuantizedTensor& tensor : tensors) {
+                    q_size += static_cast<std::int64_t>(tensor.q.size());
+                    s_size += static_cast<std::int64_t>(tensor.s.size());
+                    for (int8_t value : tensor.q) { q_sum += value; }
+                }
+                summary.push_back(static_cast<double>(q_size));
+                summary.push_back(tensors.front().q.front());
+                summary.push_back(static_cast<double>(q_sum));
+                summary.push_back(static_cast<double>(s_size));
+                summary.push_back(tensors.front().s.front());
+            };
+        summarize_quantized(w.q_tokens);
+        summarize_quantized(w.wq);
+        summarize_quantized(w.wk);
+        summarize_quantized(w.wv);
+        summarize_quantized(w.wo);
+        summarize_quantized(w.w1);
+        summarize_quantized(w.w2);
+        summarize_quantized(w.w3);
+        write_values("out_summary.txt", std::span<const double>{summary});
+
+        // 11.2: quantize and dequantize the supplied 64-value vector.
+        const std::vector<float> input_x = load_floats("data/input_x.txt");
+        if (input_x.size() % static_cast<size_t>(transformer.GS) != 0) {
+            throw std::runtime_error("input_x size must be divisible by GS");
+        }
+        std::vector<int8_t> q(input_x.size());
+        std::vector<float> scales(input_x.size() / transformer.GS);
+        QuantizedTensor qx{q, scales};
+        quantize(qx, input_x);
+        std::vector<float> deq(input_x.size());
+        dequantize(qx, deq);
+        write_values("out_q.txt", std::span<const int8_t>{q});
+        write_values("out_s.txt", std::span<const float>{scales});
+        write_values("out_deq.txt", std::span<const float>{deq});
+
+        // 11.3: standalone int8 matmul (this fixture deliberately uses GS=4).
+        const std::vector<int> wq_input = load_ints("data/input_matmul_wq.txt");
+        const std::vector<int> xq_input = load_ints("data/input_matmul_xq.txt");
+        std::vector<int8_t> mat_wq = to_int8(wq_input);
+        std::vector<int8_t> mat_xq = to_int8(xq_input);
+        std::vector<float> mat_ws = load_floats("data/input_matmul_ws.txt");
+        std::vector<float> mat_xs = load_floats("data/input_matmul_xs.txt");
+        if (mat_xq.empty() || mat_wq.size() % mat_xq.size() != 0) {
+            throw std::runtime_error("bad standalone matmul dimensions");
+        }
+        std::vector<float> mat_out(mat_wq.size() / mat_xq.size());
+        QuantizedTensor mat_w{mat_wq, mat_ws};
+        QuantizedTensor mat_x{mat_xq, mat_xs};
+        matmul(mat_out, mat_x, mat_w);
+        write_values("out_matmul.txt", std::span<const float>{mat_out});
+
+        // 11.4: quantized forward over the five prompt tokens.
+        const std::vector<int> tokens = load_ints("data/input_tokens.txt");
+        std::vector<int> argmaxes;
+        std::vector<float> last_logits;
+        for (size_t pos = 0; pos < tokens.size(); pos++) {
+            const std::span<float> logits =
+                transformer.forward(tokens[pos], static_cast<int>(pos));
+            argmaxes.push_back(
+                static_cast<int>(std::ranges::max_element(logits) - logits.begin()));
+            if (pos + 1 == tokens.size()) {
+                last_logits.assign(logits.begin(), logits.end());
             }
         }
+        write_values("out_argmax.txt", std::span<const int>{argmaxes});
+        write_values("out_logits.txt", std::span<const float>{last_logits});
 
-        if (rng_seed == 0) { rng_seed = static_cast<std::uint64_t>(std::time(nullptr)); }
-        if (temperature < 0.0) { temperature = 0.0; }
-        if (topp < 0.0 || 1.0 < topp) { topp = 0.9; }
-        if (steps < 0) { steps = 0; }
-
-        Transformer transformer(checkpoint_path);
-        if (steps == 0 || steps > transformer.config.seq_len) { steps = transformer.config.seq_len; }
-
+        // Start from a fresh cache and run the complete greedy generation loop.
+        Transformer generator(checkpoint_path);
         Tokenizer tokenizer(tokenizer_path, transformer.config.vocab_size);
-        Sampler sampler(transformer.config.vocab_size, temperature, topp, rng_seed);
-
-        if (mode == "generate") {
-            generate(transformer, tokenizer, sampler, prompt, steps);
-        } else if (mode == "chat") {
-            chat(transformer, tokenizer, sampler, prompt, system_prompt, steps);
-        } else {
-            throw std::runtime_error("unknown mode: " + mode);
+        Sampler sampler(transformer.config.vocab_size, 0.0f, 0.9f, 42);
+        const std::vector<int> prompt_tokens =
+            tokenizer.encode("Once upon a time", /*bos=*/true, /*eos=*/false);
+        std::vector<int> generated_ids;
+        std::string generated_text;
+        int token = prompt_tokens.front();
+        for (int pos = 0; pos < 64; pos++) {
+            std::span<float> logits = generator.forward(token, pos);
+            const int next = pos < static_cast<int>(prompt_tokens.size()) - 1
+                                 ? prompt_tokens[pos + 1]
+                                 : sampler.sample(logits);
+            if (next == 1) { break; }
+            generated_ids.push_back(next);
+            generated_text += tokenizer.decode(token, next);
+            token = next;
         }
+        write_values("out_ids.txt", std::span<const int>{generated_ids});
+        write_text("out_text.txt", generated_text + '\n');
+
+        std::cout << "wrote checkpoint, kernel, forward, and generation outputs\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << '\n';
