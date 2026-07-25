@@ -1,6 +1,6 @@
 # 11 quantize: int8 quantized inference <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: upgrade the FP32 implementation to int8 quantization and rebuild
 > `runq.cpp`. The changes are concentrated in three places: weight storage

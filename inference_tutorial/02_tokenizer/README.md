@@ -1,6 +1,6 @@
 # 02 tokenizer: BPE encoding and decoding <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: implement `encode` (text -> token ids) and `decode` (id -> text piece).
 > Standalone module: no model weights needed, only `../../tokenizer.bin`.

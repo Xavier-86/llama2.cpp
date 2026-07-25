@@ -1,6 +1,6 @@
 # 10 generate：生成循环（prefill / decode） <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：将 forward、sampler 和 tokenizer 串成完整的文本生成流程。通过本模块意味着你已重建 FP32 `run.cpp`。
 

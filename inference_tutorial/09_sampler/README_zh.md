@@ -1,6 +1,6 @@
 # 09 sampler：从 logits 选择下一个 token <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：实现三种采样策略。输入 32000 个分数，输出一个 token id。
 

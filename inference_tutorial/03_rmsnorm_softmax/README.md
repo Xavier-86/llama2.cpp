@@ -1,6 +1,6 @@
 # 03 rmsnorm / softmax: two small kernels <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: implement the two normalization functions that appear everywhere in the
 > Transformer. Each is under 10 lines.

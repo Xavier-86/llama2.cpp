@@ -1,6 +1,6 @@
 # 11 quantize：int8 量化推理 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：将 FP32 实现升级为 int8 量化并重建 `runq.cpp`。改动集中在三个部分：权重存储格式、矩阵乘法，以及每次矩阵乘法前对激活进行量化。tokenizer、sampler 和生成循环均原样复用。
 

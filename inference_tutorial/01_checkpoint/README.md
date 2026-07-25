@@ -1,6 +1,6 @@
 # 01 checkpoint: load the model weights <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: understand the `stories15M.bin` file format and map the 11 weight
 > tensors out of it. Everything later pulls weights from here.

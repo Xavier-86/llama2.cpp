@@ -1,6 +1,6 @@
 # 06 attention: multi-head causal attention <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: implement the heart of the Transformer — multi-head attention with a KV
 > cache. The easiest module to get subtly wrong; budget extra time.

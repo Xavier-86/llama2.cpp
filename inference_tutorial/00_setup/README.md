@@ -1,6 +1,6 @@
 # 00 setup: build the reference, get a baseline <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: compile the reference implementation, run it once, and hold on to the
 > "correct answer" that every later module will approximate.

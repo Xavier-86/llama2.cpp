@@ -1,6 +1,6 @@
 # 10 generate: the generation loop (prefill / decode) <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: wire forward + sampler + tokenizer into full text generation. Passing
 > this means you have rebuilt the FP32 `run.cpp`.

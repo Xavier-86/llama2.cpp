@@ -1,6 +1,6 @@
 # 00 环境准备：构建参考实现并建立基线 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：编译参考实现并运行一次，保留这个“正确答案”，后续所有模块都将逐步逼近它。
 

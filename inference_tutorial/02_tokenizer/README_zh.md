@@ -1,6 +1,6 @@
 # 02 tokenizer：BPE 编码与解码 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：实现 `encode`（文本 -> token id）和 `decode`（id -> 文本片段）。这是独立模块，不需要模型权重，只需 `../../tokenizer.bin`。
 

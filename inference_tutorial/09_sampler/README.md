@@ -1,6 +1,6 @@
 # 09 sampler: from logits to the next token <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: implement three sampling strategies. Input: 32000 scores. Output: one
 > token id.

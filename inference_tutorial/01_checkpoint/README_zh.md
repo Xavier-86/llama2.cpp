@@ -1,6 +1,6 @@
 # 01 checkpoint：加载模型权重 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：理解 `stories15M.bin` 文件格式，并映射其中的 11 个权重张量。后续所有模块都会从这里读取权重。
 

@@ -22,7 +22,7 @@
 | `tokenizer.bin` | BPE 分词器数据（Llama 2 32K 词表） |
 | `stories15M.bin` / `stories42M.bin` | FP32 模型权重（TinyStories 小模型，来自 [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas)） |
 | `stories*-q32.bin` | int8 量化权重（由 `quantize` 生成，GS=32） |
-| `inference_tutorial/` | 将 FP32 与 int8 推理分解为 12 个可独立验证模块的动手教程 |
+| [`inference_tutorial/`](inference_tutorial/README_zh.md) | 将 FP32 与 int8 推理分解为 12 个可独立验证模块的动手教程 |
 
 注意：`stories*.bin` 权重**不在 git 仓库里**（体积太大）。从 [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) 下载 `stories15M.bin` / `stories42M.bin` 放到本目录即可；`tokenizer.bin` 已包含在仓库中。
 
@@ -95,7 +95,7 @@ c++ -O3 -std=c++17 -o quantize quantize.cpp # 量化转换工具
 
 ## 分步推理教程
 
-[`inference_tutorial/`](inference_tutorial/README.md) 是本仓库配套的动手学习路线，
+[`inference_tutorial/`](inference_tutorial/README_zh.md) 是本仓库配套的动手学习路线，
 把两个单文件推理程序拆成 12 个小模块：
 
 1. checkpoint 加载与 BPE 分词

@@ -1,6 +1,6 @@
 # 07 FFN：SwiGLU 前馈网络 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：实现每层的第二个大模块。注意力在**不同位置之间**混合信息；FFN **独立处理每个位置**，并包含模型的大部分参数。
 

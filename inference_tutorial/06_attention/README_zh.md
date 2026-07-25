@@ -1,6 +1,6 @@
 # 06 attention：多头因果注意力 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：实现 Transformer 的核心——带 KV cache 的多头注意力。这是最容易出现隐蔽错误的模块，请预留更多时间。
 

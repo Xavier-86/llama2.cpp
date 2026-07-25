@@ -1,6 +1,6 @@
 # 05 RoPE: rotary position embedding <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: inject position information into Q and K. Attention alone cannot tell
 > word order — this step is what makes it position-aware.

@@ -1,6 +1,6 @@
 # 08 forward：组装完整的单步前向传播（FP32） <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：将模块 01～07 组装为完整的 `forward(token, pos) -> logits`。这是 FP32 的总装，也是第一个里程碑验收。
 

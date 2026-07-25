@@ -1,6 +1,6 @@
 # 08 forward: assemble the full single-step pass (FP32) <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: assemble modules 01-07 into a complete `forward(token, pos) -> logits`.
 > This is the FP32 grand assembly — the first milestone acceptance.

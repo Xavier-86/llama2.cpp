@@ -22,7 +22,7 @@
 | `tokenizer.bin` | BPE tokenizer data (Llama 2 32K vocab) |
 | `stories15M.bin` / `stories42M.bin` | FP32 model weights (TinyStories models from [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas)) |
 | `stories*-q32.bin` | int8 quantized weights (produced by `quantize`, GS=32) |
-| `inference_tutorial/` | Step-by-step tutorial that decomposes FP32 and int8 inference into 12 independently verifiable modules |
+| [`inference_tutorial/`](inference_tutorial/README.md) | Step-by-step tutorial that decomposes FP32 and int8 inference into 12 independently verifiable modules |
 
 Note: the `stories*.bin` weights are **not tracked in git** (too large). Download `stories15M.bin` / `stories42M.bin` from [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) and place them in this directory; `tokenizer.bin` is included in the repo.
 

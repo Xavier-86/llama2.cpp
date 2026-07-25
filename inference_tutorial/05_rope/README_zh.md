@@ -1,6 +1,6 @@
 # 05 RoPE：旋转位置编码 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：向 Q 和 K 注入位置信息。注意力本身无法判断词序，正是这一步让它感知位置。
 

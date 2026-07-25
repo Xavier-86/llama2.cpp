@@ -1,6 +1,6 @@
 # 04 matmul: matrix-vector multiply <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-[← All modules](../README.md)
+[← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: implement `W (d,n) @ x (n,) -> xout (d,)`. The model spends 99% of its
 > time inside this function.

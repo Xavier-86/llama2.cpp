@@ -1,6 +1,6 @@
 # 03 rmsnorm / softmax：两个小型内核 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：实现 Transformer 中随处可见的两个归一化函数，每个函数都不到 10 行。
 

@@ -1,6 +1,6 @@
 # 04 matmul：矩阵-向量乘法 <span style="float: right;"><a href="README.md">English</a></span>
 
-[← 所有模块](../README_zh.md)
+[← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
 > 目标：实现 `W (d,n) @ x (n,) -> xout (d,)`。模型 99% 的时间都花在此函数中。
 

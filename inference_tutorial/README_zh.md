@@ -1,5 +1,7 @@
 # 推理教程：逐模块构建 llama2 推理 <span style="float: right;"><a href="README.md">English</a></span>
 
+[← 项目首页](../README_zh.md)
+
 > 本教程是 `run.cpp` / `runq.cpp` 的动手实践指南：借助每一步的标准输入输出数据，逐个模块亲手重新实现 int8 量化的 Llama-2 推理。
 
 ## 使用方式
