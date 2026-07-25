@@ -1,0 +1,13 @@
+# compiled executables (sources kept)
+run
+runcpp*
+runqcpp*
+quantize
+
+# debug symbols
+*.dSYM/
+
+# large model weights stay out of git (download link in README)
+stories*.bin
+
+.DS_Store
