@@ -1,4 +1,4 @@
-# 05 RoPE: rotary position embedding
+# 05 RoPE: rotary position embedding <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 [← All modules](../README.md)
 

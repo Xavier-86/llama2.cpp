@@ -1,4 +1,4 @@
-# 00 setup: build the reference, get a baseline
+# 00 setup: build the reference, get a baseline <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 [← All modules](../README.md)
 

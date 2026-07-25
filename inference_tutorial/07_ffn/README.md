@@ -1,4 +1,4 @@
-# 07 FFN: SwiGLU feed-forward network
+# 07 FFN: SwiGLU feed-forward network <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 [← All modules](../README.md)
 

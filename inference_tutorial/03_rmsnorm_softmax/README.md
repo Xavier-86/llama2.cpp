@@ -1,4 +1,4 @@
-# 03 rmsnorm / softmax: two small kernels
+# 03 rmsnorm / softmax: two small kernels <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 [← All modules](../README.md)
 

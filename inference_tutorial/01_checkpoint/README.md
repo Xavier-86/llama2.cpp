@@ -1,4 +1,4 @@
-# 01 checkpoint: load the model weights
+# 01 checkpoint: load the model weights <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 [← All modules](../README.md)
 

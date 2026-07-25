@@ -11,3 +11,6 @@ quantize
 stories*.bin
 
 .DS_Store
+
+# local scratch files whose names start with an underscore
+_*

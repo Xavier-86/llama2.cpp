@@ -1,4 +1,4 @@
-# 08 forward: assemble the full single-step pass (FP32)
+# 08 forward: assemble the full single-step pass (FP32) <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 [← All modules](../README.md)
 

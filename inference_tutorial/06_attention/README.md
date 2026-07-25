@@ -1,4 +1,4 @@
-# 06 attention: multi-head causal attention
+# 06 attention: multi-head causal attention <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 [← All modules](../README.md)
 

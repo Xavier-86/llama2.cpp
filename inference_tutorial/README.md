@@ -1,4 +1,4 @@
-# Inference Tutorial: Build llama2 Inference Module by Module
+# Inference Tutorial: Build llama2 Inference Module by Module <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 > A hands-on companion to `run.cpp` / `runq.cpp`: re-implement int8-quantized
 > Llama-2 inference yourself, one module at a time, with golden input/output
