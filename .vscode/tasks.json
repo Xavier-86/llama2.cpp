@@ -1,0 +1,77 @@
+{
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "C/C++: clang++ build active file",
+            "command": "/usr/bin/clang++",
+            "args": [
+                "-fcolor-diagnostics",
+                "-fansi-escape-codes",
+                "-std=c++20",
+                "-g",
+                "-O0",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Build the currently active C++ file with clang++."
+        },
+        {
+            "type": "cppbuild",
+            "label": "build runcpp_dbg",
+            "command": "/usr/bin/clang++",
+            "args": [
+                "-fcolor-diagnostics",
+                "-fansi-escape-codes",
+                "-std=c++20",
+                "-g",
+                "-O0",
+                "${workspaceFolder}/run.cpp",
+                "-o",
+                "${workspaceFolder}/runcpp_dbg"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "detail": "Debug build of run.cpp."
+        },
+        {
+            "type": "cppbuild",
+            "label": "build runqcpp_dbg",
+            "command": "/usr/bin/clang++",
+            "args": [
+                "-fcolor-diagnostics",
+                "-fansi-escape-codes",
+                "-std=c++20",
+                "-g",
+                "-O0",
+                "${workspaceFolder}/runq.cpp",
+                "-o",
+                "${workspaceFolder}/runqcpp_dbg"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "detail": "Debug build of runq.cpp."
+        }
+    ],
+    "version": "2.0.0"
+}
