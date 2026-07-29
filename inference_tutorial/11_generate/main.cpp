@@ -1,0 +1,520 @@
+// 11_generate — student template
+//
+// Goal: wire forward (09) + sampler (10) + tokenizer (02) into the full
+// prefill/decode generation loop described in README.md. Passing this means
+// you have rebuilt the FP32 run.cpp.
+//
+// Prompt is fixed to "Once upon a time" (-> [1, 9038, 2501, 263, 931]),
+// 64 steps, two runs:
+//   greedy:  temperature=0.0, topp=0.9, seed=42 -> out_ids.txt / out_text.txt
+//   sampled: temperature=0.8, topp=0.9, seed=42 -> out_sids.txt / out_stext.txt
+//
+// Build:  c++ -O2 -std=c++20 -o main main.cpp
+// Run:    ./main            (from this module folder)
+// Verify: python3 ../tools/compare.py out_ids.txt   data/expected_greedy_ids.txt --exact
+//         python3 ../tools/compare.py out_text.txt  data/expected_greedy_text.txt --text
+//         python3 ../tools/compare.py out_sids.txt  data/expected_sampled_ids.txt --exact
+//         python3 ../tools/compare.py out_stext.txt data/expected_sampled_text.txt --text
+//
+// This module adds almost no new math: the kernels (03/04), the full forward
+// (09), the BPE tokenizer (02) and the sampler (10) are given below — the
+// components you already implemented in modules 03-10. The only new work is
+// task 6, the generation loop. Checkpoint loading (module 01), vocab loading
+// (02) and the output helpers are given via ../common/*.h.
+
+#include <algorithm>
+#include <array>
+#include <charconv>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <iostream>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "../common/checkpoint.h" // tut::load_checkpoint -> tut::Checkpoint{config, weights, buffer}
+#include "../common/io.h"         // tut::write_ints / write_text
+#include "../common/tokenizer.h"  // tut::load_vocab -> tut::Vocab{pieces, scores}
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Modules 03/04: the math kernels (accumulate in float, matching the reference)
+// given: you implemented these components in modules 03-10
+// ---------------------------------------------------------------------------
+
+// out_i = weight_i * x_i / sqrt(mean(x^2) + eps); works in place (o == x).
+void rmsnorm(std::span<float> o, std::span<const float> x, std::span<const float> weight) {
+    float ss = 0.0f;
+    for (float v : x) { ss += v * v; }
+    ss /= x.size();
+    ss += 1e-5f;
+    ss = 1.0f / std::sqrt(ss);
+    for (size_t j = 0; j < x.size(); j++) { o[j] = weight[j] * (ss * x[j]); }
+}
+
+// In-place and numerically stable: subtract the max before exp.
+void softmax(std::span<float> x) {
+    const float max_val = *std::ranges::max_element(x);
+    float sum = 0.0f;
+    for (float& v : x) {
+        v = std::exp(v - max_val);
+        sum += v;
+    }
+    for (float& v : x) { v /= sum; }
+}
+
+// W (d,n) @ x (n,) -> xout (d,); w holds d rows of n elements, row-major.
+// The vast majority of the model's runtime is spent in this small function:
+// each weight participates in exactly one multiply-add, so performance is
+// bound by memory bandwidth.
+void matmul(std::span<float> xout, std::span<const float> x, std::span<const float> w) {
+    const size_t n = x.size();
+    const size_t d = xout.size();
+    for (size_t i = 0; i < d; i++) {
+        const std::span w_row = w.subspan(i * n, n);
+        float val = 0.0f;
+        for (size_t j = 0; j < n; j++) { val += w_row[j] * x[j]; }
+        xout[i] = val;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Module 09: the full single-step forward pass
+// given: you implemented these components in modules 03-10
+// ---------------------------------------------------------------------------
+
+// Intermediate buffers; the KV cache is (layer, seq_len, kv_dim).
+struct RunState {
+    std::vector<float> x;           // activation at the current position (dim,)
+    std::vector<float> xb;          // same, but inside a residual branch (dim,)
+    std::vector<float> xb2;         // an additional buffer just for convenience (dim,)
+    std::vector<float> hb;          // buffer for the hidden dimension in the ffn (hidden_dim,)
+    std::vector<float> hb2;         // second ffn hidden buffer (hidden_dim,)
+    std::vector<float> q;           // query (dim,)
+    std::vector<float> att;         // attention scores (n_heads, seq_len)
+    std::vector<float> logits;      // output logits (vocab_size,)
+    std::vector<float> key_cache;   // (layer, seq_len, kv_dim)
+    std::vector<float> value_cache; // (layer, seq_len, kv_dim)
+
+    RunState() = default;
+    explicit RunState(const tut::Config& p)
+        : x(p.dim), xb(p.dim), xb2(p.dim), hb(p.hidden_dim), hb2(p.hidden_dim), q(p.dim),
+          att(static_cast<size_t>(p.n_heads) * p.seq_len), logits(std::abs(p.vocab_size)),
+          key_cache(static_cast<size_t>(p.n_layers) * p.seq_len * kv_dim(p)),
+          value_cache(static_cast<size_t>(p.n_layers) * p.seq_len * kv_dim(p)) {}
+
+    static size_t kv_dim(const tut::Config& p) {
+        return static_cast<size_t>(p.n_kv_heads) * (p.dim / p.n_heads);
+    }
+};
+
+struct Transformer {
+    tut::Checkpoint checkpoint; // config + 11 weight spans; owns the weight buffer
+    RunState state;
+
+    // checkpoint parsing (module 01) is given: common/checkpoint.h does it.
+    explicit Transformer(const std::string& checkpoint_path)
+        : checkpoint(tut::load_checkpoint(checkpoint_path)), state(checkpoint.config) {}
+
+    // one forward step: takes the current token and position, returns logits for the next token
+    std::span<float> forward(int token, int pos) {
+        const tut::Config& p = checkpoint.config;
+        const tut::Weights& w = checkpoint.weights;
+        RunState& s = state;
+        const int dim = p.dim;
+        const int head_size = dim / p.n_heads;
+        const int kvd = p.n_kv_heads * head_size;
+        const int kv_mul = p.n_heads / p.n_kv_heads; // kv sharing factor for GQA
+        const int hidden_dim = p.hidden_dim;
+
+        std::span<float> x{s.x};
+        // copy the token's embedding row into x
+        std::ranges::copy(w.token_embedding_table.subspan(static_cast<size_t>(token) * dim, dim),
+                          x.begin());
+
+        for (int l = 0; l < p.n_layers; l++) {
+            const size_t loff = static_cast<size_t>(l) * p.seq_len * kvd;
+
+            // k/v are views into the KV cache at this layer and position: each step
+            // computes k/v only for the current token; earlier positions are read
+            // back from the cache, not recomputed
+            std::span<float> k = std::span{s.key_cache}.subspan(loff + static_cast<size_t>(pos) * kvd, kvd);
+            std::span<float> v = std::span{s.value_cache}.subspan(loff + static_cast<size_t>(pos) * kvd, kvd);
+
+            // rmsnorm before attention, then qkv projections for the current position
+            rmsnorm(s.xb, x, w.rms_att_weight.subspan(static_cast<size_t>(l) * dim, dim));
+            matmul(s.q, s.xb, w.wq.subspan(static_cast<size_t>(l) * dim * dim, static_cast<size_t>(dim) * dim));
+            matmul(k, s.xb, w.wk.subspan(static_cast<size_t>(l) * dim * kvd, static_cast<size_t>(dim) * kvd));
+            matmul(v, s.xb, w.wv.subspan(static_cast<size_t>(l) * dim * kvd, static_cast<size_t>(dim) * kvd));
+
+            // RoPE (module 05): rotate q/k pairs as complex numbers within each head
+            for (int i = 0; i < dim; i += 2) {
+                const int head_dim = i % head_size;
+                const float freq = 1.0f / std::pow(10000.0f, head_dim / static_cast<float>(head_size));
+                const float angle = pos * freq;
+                const float fcr = std::cos(angle);
+                const float fci = std::sin(angle);
+                const int rotn = i < kvd ? 2 : 1; // 2 = rotate both q and k, 1 = rotate q only
+                for (int rot = 0; rot < rotn; rot++) {
+                    std::span<float> vec = rot == 0 ? std::span{s.q} : k;
+                    const float v0 = vec[i];
+                    const float v1 = vec[i + 1];
+                    vec[i]     = v0 * fcr - v1 * fci;
+                    vec[i + 1] = v0 * fci + v1 * fcr;
+                }
+            }
+
+            // multi-head causal attention (module 06)
+            for (int h = 0; h < p.n_heads; h++) {
+                std::span qh = std::span{s.q}.subspan(static_cast<size_t>(h) * head_size, head_size);
+                std::span att = std::span{s.att}.subspan(static_cast<size_t>(h) * p.seq_len,
+                                                         static_cast<size_t>(pos) + 1);
+                // score against history + current only: t in [0, pos] is the causal mask;
+                // attention cost grows linearly with the sequence length
+                for (int t = 0; t <= pos; t++) {
+                    std::span key = std::span{s.key_cache}.subspan(
+                        loff + static_cast<size_t>(t) * kvd + static_cast<size_t>(h / kv_mul) * head_size,
+                        head_size);
+                    float score = 0.0f;
+                    for (int i = 0; i < head_size; i++) { score += qh[i] * key[i]; }
+                    score /= std::sqrt(static_cast<float>(head_size));
+                    att[t] = score;
+                }
+
+                softmax(att);
+
+                // weighted sum of the V rows, written into this head's slice of xb
+                std::span xb = std::span{s.xb}.subspan(static_cast<size_t>(h) * head_size, head_size);
+                std::ranges::fill(xb, 0.0f);
+                for (int t = 0; t <= pos; t++) {
+                    std::span val = std::span{s.value_cache}.subspan(
+                        loff + static_cast<size_t>(t) * kvd + static_cast<size_t>(h / kv_mul) * head_size,
+                        head_size);
+                    const float a = att[t];
+                    for (int i = 0; i < head_size; i++) { xb[i] += a * val[i]; }
+                }
+            }
+
+            // attention output projection + residual connection
+            matmul(s.xb2, s.xb, w.wo.subspan(static_cast<size_t>(l) * dim * dim, static_cast<size_t>(dim) * dim));
+            for (int i = 0; i < dim; i++) { x[i] += s.xb2[i]; }
+
+            // rmsnorm before the ffn
+            rmsnorm(s.xb, x, w.rms_ffn_weight.subspan(static_cast<size_t>(l) * dim, dim));
+
+            // FFN (module 07): w2(silu(w1(x)) * w3(x)); compute w1 and w3 first
+            matmul(s.hb, s.xb, w.w1.subspan(static_cast<size_t>(l) * dim * hidden_dim,
+                                            static_cast<size_t>(dim) * hidden_dim));
+            matmul(s.hb2, s.xb, w.w3.subspan(static_cast<size_t>(l) * dim * hidden_dim,
+                                             static_cast<size_t>(dim) * hidden_dim));
+
+            // SwiGLU nonlinearity: silu(v) = v * sigmoid(v)
+            for (int i = 0; i < hidden_dim; i++) {
+                float val = s.hb[i];
+                val *= (1.0f / (1.0f + std::exp(-val)));
+                val *= s.hb2[i];
+                s.hb[i] = val;
+            }
+
+            // ffn output projection + residual connection
+            matmul(s.xb, s.hb, w.w2.subspan(static_cast<size_t>(l) * hidden_dim * dim,
+                                            static_cast<size_t>(hidden_dim) * dim));
+            for (int i = 0; i < dim; i++) { x[i] += s.xb[i]; }
+        }
+
+        // final rmsnorm (in place) + classifier head to get the logits
+        rmsnorm(x, x, w.rms_final_weight);
+        matmul(s.logits, x, w.wcls);
+        return s.logits;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Module 02: BPE tokenizer (encode / decode)
+// given: you implemented these components in modules 03-10
+// ---------------------------------------------------------------------------
+
+struct TokenIndex {
+    std::string_view str;
+    int id;
+};
+
+class Tokenizer {
+public:
+    // The vocab table itself is loaded by common/tokenizer.h (tut::load_vocab);
+    // the BPE algorithm below is the given module-02 implementation.
+    explicit Tokenizer(tut::Vocab vocab)
+        : vocab_(std::move(vocab.pieces)), vocab_scores_(std::move(vocab.scores)),
+          vocab_size_(static_cast<int>(vocab_.size())) {
+        // printable single-byte strings for the <0xXX> fallback pieces
+        for (int i = 0; i < 256; i++) {
+            byte_pieces_[i * 2] = static_cast<char>(i);
+            byte_pieces_[i * 2 + 1] = '\0';
+        }
+    }
+
+    // Returns the text piece for `token`; `prev_token` is needed to strip the
+    // leading space right after BOS and to expand <0xXX> byte pieces.
+    std::string_view decode(int prev_token, int token) const {
+        std::string_view piece = vocab_[token];
+        if (prev_token == 1 && piece.starts_with(' ')) { piece.remove_prefix(1); }
+        if (piece.size() == 6 && piece.starts_with("<0x") && piece.back() == '>') {
+            unsigned int byte_val = 0;
+            const char* hex = piece.data() + 3;
+            auto [end, ec] = std::from_chars(hex, hex + 2, byte_val, 16);
+            if (ec == std::errc{} && end == hex + 2) {
+                return {byte_pieces_.data() + byte_val * 2, 1};
+            }
+        }
+        return piece;
+    }
+
+    // BPE encode: BOS + leading " " + per-character tokens, then greedy merges.
+    std::vector<int> encode(const std::string& text, bool bos, bool eos) {
+        std::vector<int> tokens;
+        if (bos) { tokens.push_back(1); } // 1 = <s>
+        // Llama convention: pretend the text started with a space.
+        if (!text.empty()) { tokens.push_back(str_lookup(" ")); }
+
+        // Per-character lookup on UTF-8 boundaries: a byte with
+        // (c & 0xC0) != 0x80 starts a new character.
+        std::string str_buffer;
+        for (size_t i = 0; i < text.size(); i++) {
+            char c = text[i];
+            if ((c & 0xC0) != 0x80) { str_buffer.clear(); }
+            str_buffer.push_back(c);
+            if (i + 1 < text.size() && (text[i + 1] & 0xC0) == 0x80 && str_buffer.size() < 4) {
+                continue; // more continuation bytes belong to this character
+            }
+            int id = str_lookup(str_buffer);
+            if (id != -1) {
+                tokens.push_back(id);
+            } else {
+                // Byte fallback: byte b -> token id b + 3.
+                for (unsigned char b : str_buffer) { tokens.push_back(b + 3); }
+            }
+            str_buffer.clear();
+        }
+
+        // Greedy merging: merge the highest-scoring adjacent pair each round.
+        while (true) {
+            float best_score = -1e10f;
+            int best_id = -1;
+            int best_idx = -1;
+            for (size_t i = 0; i + 1 < tokens.size(); i++) {
+                std::string merged = vocab_[tokens[i]] + vocab_[tokens[i + 1]];
+                int id = str_lookup(merged);
+                if (id != -1 && vocab_scores_[id] > best_score) {
+                    best_score = vocab_scores_[id];
+                    best_id = id;
+                    best_idx = static_cast<int>(i);
+                }
+            }
+            if (best_idx == -1) { break; }
+            tokens[best_idx] = best_id;
+            tokens.erase(tokens.begin() + best_idx + 1);
+        }
+
+        if (eos) { tokens.push_back(2); } // 2 = </s>
+        return tokens;
+    }
+
+private:
+    void init_sorted_vocab() {
+        if (!sorted_vocab_.empty()) { return; }
+        sorted_vocab_.reserve(vocab_size_);
+        for (int i = 0; i < vocab_size_; i++) {
+            sorted_vocab_.push_back({vocab_[i], i});
+        }
+        std::sort(sorted_vocab_.begin(), sorted_vocab_.end(),
+                  [](const TokenIndex& a, const TokenIndex& b) { return a.str < b.str; });
+    }
+
+    int str_lookup(std::string_view str) {
+        init_sorted_vocab();
+        auto it = std::lower_bound(sorted_vocab_.begin(), sorted_vocab_.end(), str,
+                                   [](const TokenIndex& a, std::string_view b) { return a.str < b; });
+        if (it != sorted_vocab_.end() && it->str == str) { return it->id; }
+        return -1;
+    }
+
+    std::vector<std::string> vocab_;
+    std::vector<float> vocab_scores_;
+    std::vector<TokenIndex> sorted_vocab_;
+    int vocab_size_;
+    std::array<char, 512> byte_pieces_{};
+};
+
+// ---------------------------------------------------------------------------
+// Module 10: sampler (xorshift RNG, greedy / mult / top-p)
+// given: you implemented these components in modules 03-10
+// ---------------------------------------------------------------------------
+
+struct ProbIndex {
+    float prob;
+    int index;
+};
+
+class Sampler {
+public:
+    Sampler(int vocab_size, float temperature, float topp, std::uint64_t rng_seed)
+        : temperature_(temperature), topp_(topp), rng_state_(rng_seed), probindex_(vocab_size) {}
+
+    // Sample the next token from logits. Mutates logits (temperature scale + softmax).
+    int sample(std::span<float> logits) {
+        if (temperature_ == 0.0f) { return sample_argmax(logits); }
+        for (float& v : logits) { v /= temperature_; }
+        softmax(logits);
+        const float coin = random_f32();
+        if (topp_ <= 0 || topp_ >= 1) { return sample_mult(logits, coin); }
+        return sample_topp(logits, topp_, coin);
+    }
+
+private:
+    // Greedy: index of the largest probability.
+    static int sample_argmax(std::span<const float> probabilities) {
+        return static_cast<int>(std::ranges::max_element(probabilities) - probabilities.begin());
+    }
+
+    // Full distribution: walk the CDF until the coin falls inside.
+    static int sample_mult(std::span<const float> probabilities, float coin) {
+        float cdf = 0.0f;
+        for (size_t i = 0; i < probabilities.size(); i++) {
+            cdf += probabilities[i];
+            if (coin < cdf) { return static_cast<int>(i); }
+        }
+        return static_cast<int>(probabilities.size()) - 1;
+    }
+
+    // Top-p (nucleus): filter tiny probs, sort descending, keep the smallest
+    // prefix whose cumulative prob exceeds topp, sample within that prefix.
+    int sample_topp(std::span<const float> probabilities, float topp, float coin) {
+        const int n = static_cast<int>(probabilities.size());
+        int n0 = 0;
+        const float cutoff = (1.0f - topp) / (n - 1);
+        for (int i = 0; i < n; i++) {
+            if (probabilities[i] >= cutoff) {
+                probindex_[n0] = {probabilities[i], i};
+                n0++;
+            }
+        }
+        std::sort(probindex_.begin(), probindex_.begin() + n0,
+                  [](const ProbIndex& a, const ProbIndex& b) { return a.prob > b.prob; });
+
+        float cumulative_prob = 0.0f;
+        int last_idx = n0 - 1;
+        for (int i = 0; i < n0; i++) {
+            cumulative_prob += probindex_[i].prob;
+            if (cumulative_prob > topp) {
+                last_idx = i;
+                break;
+            }
+        }
+
+        float r = coin * cumulative_prob;
+        float cdf = 0.0f;
+        for (int i = 0; i <= last_idx; i++) {
+            cdf += probindex_[i].prob;
+            if (r < cdf) { return probindex_[i].index; }
+        }
+        return probindex_[last_idx].index;
+    }
+
+    // xorshift64 with a final multiply; must match the reference bit-for-bit.
+    std::uint32_t random_u32() {
+        rng_state_ ^= rng_state_ >> 12;
+        rng_state_ ^= rng_state_ << 25;
+        rng_state_ ^= rng_state_ >> 27;
+        return static_cast<std::uint32_t>((rng_state_ * 0x2545F4914F6CDD1Dull) >> 32);
+    }
+    float random_f32() { return (random_u32() >> 8) / 16777216.0f; }
+
+    float temperature_;
+    float topp_;
+    std::uint64_t rng_state_;
+    std::vector<ProbIndex> probindex_;
+};
+
+// ---------------------------------------------------------------------------
+// Module 11 itself: the generation loop (prefill / decode)
+// ---------------------------------------------------------------------------
+
+struct Generation {
+    std::vector<int> ids; // every `next` token, in order (prompt "next"s included)
+    std::string text;     // concatenated decode(token, next) pieces
+};
+
+// prefill = the first steps force-feed prompt tokens (one forward per step);
+// decode  = after the prompt is consumed, sample 1 token per step, serially.
+Generation generate(Transformer& transformer, Tokenizer& tokenizer, Sampler& sampler,
+                    const std::string& prompt, int steps) {
+    (void)transformer;
+    (void)tokenizer;
+    (void)sampler;
+    (void)prompt;
+    (void)steps;
+    // TODO(task 6): the loop from README.md —
+    //   prompt_tokens = encode(prompt, bos=true)
+    //   token = prompt_tokens[0];  pos = 0
+    //   while pos < steps:
+    //       logits = forward(token, pos)
+    //       if pos < len(prompt_tokens) - 1:
+    //           next = prompt_tokens[pos + 1]   # prefill: force-feed the next prompt token
+    //       else:
+    //           next = sample(logits)           # decode: the model decides
+    //       pos += 1
+    //       if next == 1: break                 # BOS again = stop
+    //       ids.push_back(next)
+    //       text += decode(token, next)         # note the (current, next) pair
+    //       token = next
+    // Hints:
+    //   - the sampled run must consume one random number per step, in exactly
+    //     the reference's order — one extra RNG call and everything diverges
+    //   - optional: measure tok/s from the second token onward and print it to
+    //     stderr; compare with the reference's "achieved tok/s"
+    return {};
+}
+
+} // namespace
+
+// driver (given — no changes needed once the task above is done)
+int main() {
+    try {
+        const std::string checkpoint_path = "../../stories15M.bin";
+        const std::string tokenizer_path = "../../tokenizer.bin";
+        const std::string prompt = "Once upon a time"; // -> [1, 9038, 2501, 263, 931]
+        const int steps = 64;
+
+        // Run 1: greedy decoding (temperature = 0 takes the argmax path).
+        {
+            Transformer transformer(checkpoint_path);
+            const int vocab_size = std::abs(transformer.checkpoint.config.vocab_size);
+            Tokenizer tokenizer(tut::load_vocab(tokenizer_path, vocab_size));
+            Sampler sampler(vocab_size, /*temperature=*/0.0f, /*topp=*/0.9f, /*seed=*/42);
+            const Generation g = generate(transformer, tokenizer, sampler, prompt, steps);
+            tut::write_ints("out_ids.txt", g.ids);
+            tut::write_text("out_text.txt", g.text + '\n'); // golden files end with a newline
+            std::cout << "greedy:  " << g.ids.size() << " tokens -> out_ids.txt / out_text.txt\n";
+        }
+
+        // Run 2: sampled decoding (temperature = 0.8, top-p = 0.9, seed = 42).
+        {
+            Transformer transformer(checkpoint_path);
+            const int vocab_size = std::abs(transformer.checkpoint.config.vocab_size);
+            Tokenizer tokenizer(tut::load_vocab(tokenizer_path, vocab_size));
+            Sampler sampler(vocab_size, /*temperature=*/0.8f, /*topp=*/0.9f, /*seed=*/42);
+            const Generation g = generate(transformer, tokenizer, sampler, prompt, steps);
+            tut::write_ints("out_sids.txt", g.ids);
+            tut::write_text("out_stext.txt", g.text + '\n'); // golden files end with a newline
+            std::cout << "sampled: " << g.ids.size() << " tokens -> out_sids.txt / out_stext.txt\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "error: " << e.what() << '\n';
+        return 1;
+    }
+    return 0;
+}

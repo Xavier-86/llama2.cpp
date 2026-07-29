@@ -24,7 +24,7 @@
 | `stories*-q32.bin` | int8 量化权重（由 `quantize` 生成，GS=32） |
 | [`inference_tutorial/`](inference_tutorial/README_zh.md) | 将 FP32 与 int8 推理分解为 12 个可独立验证模块的动手教程 |
 
-注意：`stories*.bin` 权重**不在 git 仓库里**（体积太大）。从 [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) 下载 `stories15M.bin` / `stories42M.bin` 放到本目录即可；`tokenizer.bin` 已包含在仓库中。
+注意：`stories*.bin` 权重已被 git 跟踪。如需重新获取，从 [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) 下载 `stories15M.bin` / `stories42M.bin` 放到本目录即可；`tokenizer.bin` 已包含在仓库中。
 
 ## 编译
 

@@ -7,9 +7,6 @@ quantize
 # debug symbols
 *.dSYM/
 
-# large model weights stay out of git (download link in README)
-stories*.bin
-
 .DS_Store
 
 # local scratch files whose names start with an underscore

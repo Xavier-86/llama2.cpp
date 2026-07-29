@@ -1,37 +1,40 @@
-// 09_sampler — reference solution
+// 10_sampler — reference solution
 //
 // Implements the three sampling strategies of llama2 (greedy argmax,
 // full-distribution sampling, top-p / nucleus sampling) plus the xorshift
 // RNG that must match the reference bit-for-bit.
 //
-// build:  c++ -O2 -std=c++20 -o solution solution.cpp
-// run:    ./solution        (from the module folder; writes out_rng.txt and out.txt)
-// verify: python3 ../tools/compare.py out_rng.txt data/expected_rng_seed42.txt
+// The synthetic logits are the const array kLogitsSynth below; the real
+// 32000-dim logits stay in a data file (too large to embed) and are loaded
+// with a single tut::read_floats call — the tutorial's one exception.
+//
+// Build:  c++ -O2 -std=c++20 -o solution solution.cpp
+// Run:    ./solution
+// Verify: python3 ../tools/compare.py out_rng.txt data/expected_rng_seed42.txt
 //         python3 ../tools/compare.py out.txt data/expected_samples.txt --exact
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <span>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
-// ----------------------------------------------------------------------------
-// helpers
+#include "../common/io.h"
 
-// Load a whitespace-separated list of floats (one per line in the data files).
-std::vector<float> load_floats(const std::string& path) {
-    std::ifstream in(path);
-    if (!in) { throw std::runtime_error("cannot open " + path); }
-    std::vector<float> v;
-    float x;
-    while (in >> x) { v.push_back(x); }
-    return v;
-}
+// ---------------------------------------------------------------------------
+// Toy input: synthetic logits for a vocab of 8.
+// ---------------------------------------------------------------------------
+
+// Flat ramp so every token has a visibly different probability; this is what
+// actually exercises the mult / top-p paths (the real distribution is 96.6%
+// peaked on its argmax, so all real cases pick it).
+const float kLogitsSynth[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
+
+// ---------------------------------------------------------------------------
+// helper kernel
+// ---------------------------------------------------------------------------
 
 // In-place softmax with max subtraction for numerical stability.
 void softmax(std::span<float> x) {
@@ -44,8 +47,9 @@ void softmax(std::span<float> x) {
     for (float& v : x) { v /= sum; }
 }
 
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Sampler
+// ---------------------------------------------------------------------------
 
 struct ProbIndex {
     float prob;
@@ -134,43 +138,48 @@ private:
     std::vector<ProbIndex> probindex_;
 };
 
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // driver
+// ---------------------------------------------------------------------------
 
 int main() {
     try {
-        // 1. RNG self-check: first 10 coins for seed 42.
+        // 1. RNG self-check: first 10 coins for seed 42 -> out_rng.txt
         {
             Sampler rng(/*vocab_size=*/1, /*temperature=*/1.0f, /*topp=*/1.0f, /*seed=*/42);
-            std::ofstream out("out_rng.txt");
-            out << std::scientific << std::setprecision(3);
-            for (int i = 0; i < 10; i++) { out << rng.random_f32() << '\n'; }
+            float coins[10];
+            for (float& c : coins) { c = rng.random_f32(); }
+            tut::write_floats("out_rng.txt", coins);
         }
 
-        // 2. Load the two logits vectors.
-        const std::vector<float> real = load_floats("data/input_logits.txt");
-        const std::vector<float> synth = load_floats("data/input_logits_synth.txt");
+        // 2. Load the real logits — the tutorial's single file-read exception
+        //    (32000 values are too many to embed as a const array).
+        const std::vector<float> real = tut::read_floats("data/input_logits.txt");
 
         // 3. Run the 8 cases (first 4 on real logits, last 4 on synthetic).
         struct Case {
             float temperature;
             float topp;
             std::uint64_t seed;
-            const std::vector<float>* logits;
+            std::span<const float> logits;
         };
         const Case cases[] = {
-            {0.0f, 0.9f, 42, &real},   {1.0f, 1.0f, 42, &real},
-            {0.8f, 0.9f, 42, &real},   {0.8f, 0.9f, 1234, &real},
-            {0.0f, 0.9f, 42, &synth},  {1.0f, 1.0f, 42, &synth},
-            {1.0f, 0.5f, 42, &synth},  {2.0f, 0.9f, 7, &synth},
+            {0.0f, 0.9f, 42, real},          {1.0f, 1.0f, 42, real},
+            {0.8f, 0.9f, 42, real},          {0.8f, 0.9f, 1234, real},
+            {0.0f, 0.9f, 42, kLogitsSynth},  {1.0f, 1.0f, 42, kLogitsSynth},
+            {1.0f, 0.5f, 42, kLogitsSynth},  {2.0f, 0.9f, 7, kLogitsSynth},
         };
 
-        std::ofstream out("out.txt");
-        for (const Case& c : cases) {
-            Sampler sampler(static_cast<int>(c.logits->size()), c.temperature, c.topp, c.seed);
-            std::vector<float> copy = *c.logits; // sample() mutates the logits
-            out << sampler.sample(copy) << '\n';
+        int results[8];
+        for (size_t i = 0; i < 8; i++) {
+            const Case& c = cases[i];
+            Sampler sampler(static_cast<int>(c.logits.size()), c.temperature, c.topp, c.seed);
+            std::vector<float> copy(c.logits.begin(), c.logits.end()); // sample() mutates the logits
+            results[i] = sampler.sample(copy);
         }
+        tut::write_ints("out.txt", results);
+
+        std::cout << "wrote out_rng.txt out.txt\n";
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << '\n';
         return 1;

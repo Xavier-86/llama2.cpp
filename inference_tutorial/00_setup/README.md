@@ -42,4 +42,4 @@ open the model files and print their sizes.
   (logits) over the vocabulary; the sampler picks the next token.
 - In the decode phase every step reads all weights once, so speed is roughly
   memory bandwidth ÷ bytes read per step — that is exactly why quantization
-  (module 11) speeds things up.
+  (module 12) speeds things up.

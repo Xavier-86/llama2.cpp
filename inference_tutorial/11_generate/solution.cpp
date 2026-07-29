@@ -1,9 +1,9 @@
-// 10_generate — reference solution
+// 11_generate — reference solution
 //
-// The grand FP32 assembly: checkpoint loader (01) + kernels (03/04/05/06/07)
-// + full forward (08) + sampler (09) + tokenizer (02) wired into the
-// prefill/decode generation loop. Passing this means you have rebuilt the
-// FP32 run.cpp.
+// The grand FP32 assembly: kernels (03/04/05/06/07) + full forward (09) +
+// sampler (10) + tokenizer (02) wired into the prefill/decode generation
+// loop, on top of the checkpoint/vocab loaders from ../common/*.h. Passing
+// this means you have rebuilt the FP32 run.cpp.
 //
 // Prompt is fixed to "Once upon a time" (-> [1, 9038, 2501, 263, 931]),
 // 64 steps, two runs:
@@ -23,9 +23,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -33,84 +30,11 @@
 #include <string_view>
 #include <vector>
 
+#include "../common/checkpoint.h" // tut::load_checkpoint -> tut::Checkpoint{config, weights, buffer}
+#include "../common/io.h"         // tut::write_ints / write_text
+#include "../common/tokenizer.h"  // tut::load_vocab -> tut::Vocab{pieces, scores}
+
 namespace {
-
-// ---------------------------------------------------------------------------
-// Module 01: checkpoint loader (Config + weight spans)
-// ---------------------------------------------------------------------------
-
-// checkpoint header: 7 x int32, in this exact order
-struct Config {
-    int32_t dim;
-    int32_t hidden_dim;
-    int32_t n_layers;
-    int32_t n_heads;
-    int32_t n_kv_heads;
-    int32_t vocab_size; // negative marks unshared classifier weights
-    int32_t seq_len;
-};
-
-// each tensor is just a view into the weight region — no copies
-struct Weights {
-    std::span<const float> token_embedding_table; // (vocab_size, dim)
-    std::span<const float> rms_att_weight;        // (layer, dim)
-    std::span<const float> wq;                    // (layer, dim, n_heads * head_size)
-    std::span<const float> wk;                    // (layer, dim, n_kv_heads * head_size)
-    std::span<const float> wv;                    // (layer, dim, n_kv_heads * head_size)
-    std::span<const float> wo;                    // (layer, n_heads * head_size, dim)
-    std::span<const float> rms_ffn_weight;        // (layer, dim)
-    std::span<const float> w1;                    // (layer, hidden_dim, dim)
-    std::span<const float> w2;                    // (layer, dim, hidden_dim)
-    std::span<const float> w3;                    // (layer, hidden_dim, dim)
-    std::span<const float> rms_final_weight;      // (dim,)
-    std::span<const float> wcls;                  // (vocab_size, dim), maybe shared
-};
-
-// Read the whole checkpoint, parse the config, and carve the 11 tensors out of
-// the weight region in file order. Returns the owning buffer; the spans in `w`
-// point into it, so the caller must keep it alive (and never reallocate it).
-std::vector<float> load_checkpoint(const std::string& path, Config& cfg, Weights& w) {
-    std::ifstream in(path, std::ios::binary | std::ios::ate);
-    if (!in) { throw std::runtime_error("cannot open " + path); }
-    const std::streamsize file_bytes = in.tellg();
-    in.seekg(0);
-    std::vector<float> buf(static_cast<size_t>(file_bytes) / sizeof(float));
-    in.read(reinterpret_cast<char*>(buf.data()), file_bytes);
-    if (!in) { throw std::runtime_error("failed to read " + path); }
-
-    std::memcpy(&cfg, buf.data(), sizeof(cfg));
-
-    const bool shared = cfg.vocab_size > 0;
-    const uint64_t vocab = shared ? cfg.vocab_size : -cfg.vocab_size;
-    const uint64_t dim = cfg.dim;
-    const uint64_t hidden = cfg.hidden_dim;
-    const uint64_t n_layers = cfg.n_layers;
-    const uint64_t head_size = dim / cfg.n_heads;
-    const uint64_t kv_dim = cfg.n_kv_heads * head_size;
-
-    const float* ptr = buf.data() + sizeof(Config) / sizeof(float);
-    auto carve = [&ptr](uint64_t count) {
-        std::span<const float> slice{ptr, static_cast<size_t>(count)};
-        ptr += count;
-        return slice;
-    };
-    w.token_embedding_table = carve(vocab * dim);
-    w.rms_att_weight = carve(n_layers * dim);
-    w.wq = carve(n_layers * dim * dim);
-    w.wk = carve(n_layers * dim * kv_dim);
-    w.wv = carve(n_layers * dim * kv_dim);
-    w.wo = carve(n_layers * dim * dim);
-    w.rms_ffn_weight = carve(n_layers * dim);
-    w.w1 = carve(n_layers * hidden * dim);
-    w.w2 = carve(n_layers * dim * hidden);
-    w.w3 = carve(n_layers * hidden * dim);
-    w.rms_final_weight = carve(dim);
-    // legacy precomputed RoPE tables, unused: just skip them
-    ptr += cfg.seq_len * head_size / 2;
-    ptr += cfg.seq_len * head_size / 2;
-    w.wcls = shared ? w.token_embedding_table : carve(vocab * dim);
-    return buf;
-}
 
 // ---------------------------------------------------------------------------
 // Modules 03/04: the math kernels (accumulate in float, matching the reference)
@@ -153,7 +77,7 @@ void matmul(std::span<float> xout, std::span<const float> x, std::span<const flo
 }
 
 // ---------------------------------------------------------------------------
-// Module 08: the full single-step forward pass
+// Module 09: the full single-step forward pass
 // ---------------------------------------------------------------------------
 
 // Intermediate buffers; the KV cache is (layer, seq_len, kv_dim).
@@ -170,32 +94,28 @@ struct RunState {
     std::vector<float> value_cache; // (layer, seq_len, kv_dim)
 
     RunState() = default;
-    explicit RunState(const Config& p)
+    explicit RunState(const tut::Config& p)
         : x(p.dim), xb(p.dim), xb2(p.dim), hb(p.hidden_dim), hb2(p.hidden_dim), q(p.dim),
           att(static_cast<size_t>(p.n_heads) * p.seq_len), logits(std::abs(p.vocab_size)),
           key_cache(static_cast<size_t>(p.n_layers) * p.seq_len * kv_dim(p)),
           value_cache(static_cast<size_t>(p.n_layers) * p.seq_len * kv_dim(p)) {}
 
-    static size_t kv_dim(const Config& p) {
+    static size_t kv_dim(const tut::Config& p) {
         return static_cast<size_t>(p.n_kv_heads) * (p.dim / p.n_heads);
     }
 };
 
 struct Transformer {
-    Config config{};
-    Weights weights;
+    tut::Checkpoint checkpoint; // config + 11 weight spans; owns the weight buffer
     RunState state;
-    std::vector<float> buffer; // owns the weight region; all weight spans point into it
 
-    explicit Transformer(const std::string& checkpoint_path) {
-        buffer = load_checkpoint(checkpoint_path, config, weights);
-        state = RunState(config);
-    }
+    explicit Transformer(const std::string& checkpoint_path)
+        : checkpoint(tut::load_checkpoint(checkpoint_path)), state(checkpoint.config) {}
 
     // one forward step: takes the current token and position, returns logits for the next token
     std::span<float> forward(int token, int pos) {
-        const Config& p = config;
-        Weights& w = weights;
+        const tut::Config& p = checkpoint.config;
+        const tut::Weights& w = checkpoint.weights;
         RunState& s = state;
         const int dim = p.dim;
         const int head_size = dim / p.n_heads;
@@ -316,30 +236,14 @@ struct TokenIndex {
 
 class Tokenizer {
 public:
-    explicit Tokenizer(const std::string& tokenizer_path, int vocab_size) : vocab_size_(vocab_size) {
-        vocab_.resize(vocab_size);
-        vocab_scores_.resize(vocab_size);
+    // The vocab table itself is loaded by common/tokenizer.h (tut::load_vocab).
+    explicit Tokenizer(tut::Vocab vocab)
+        : vocab_(std::move(vocab.pieces)), vocab_scores_(std::move(vocab.scores)),
+          vocab_size_(static_cast<int>(vocab_.size())) {
         // printable single-byte strings for the <0xXX> fallback pieces
         for (int i = 0; i < 256; i++) {
             byte_pieces_[i * 2] = static_cast<char>(i);
             byte_pieces_[i * 2 + 1] = '\0';
-        }
-
-        std::ifstream file(tokenizer_path, std::ios::binary);
-        if (!file) { throw std::runtime_error("couldn't load " + tokenizer_path); }
-        auto read_or_die = [&](void* dst, std::streamsize size) {
-            if (!file.read(static_cast<char*>(dst), size)) {
-                throw std::runtime_error("tokenizer file is truncated: " + tokenizer_path);
-            }
-        };
-        read_or_die(&max_token_length_, sizeof(int));
-        for (int i = 0; i < vocab_size; i++) {
-            read_or_die(&vocab_scores_[i], sizeof(float));
-            int len;
-            read_or_die(&len, sizeof(int));
-            std::string s(len, '\0');
-            read_or_die(s.data(), len);
-            vocab_[i] = std::move(s);
         }
     }
 
@@ -432,12 +336,11 @@ private:
     std::vector<float> vocab_scores_;
     std::vector<TokenIndex> sorted_vocab_;
     int vocab_size_;
-    unsigned int max_token_length_ = 0;
     std::array<char, 512> byte_pieces_{};
 };
 
 // ---------------------------------------------------------------------------
-// Module 09: sampler (xorshift RNG, greedy / mult / top-p)
+// Module 10: sampler (xorshift RNG, greedy / mult / top-p)
 // ---------------------------------------------------------------------------
 
 struct ProbIndex {
@@ -526,7 +429,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Module 10 itself: the generation loop (prefill / decode)
+// Module 11 itself: the generation loop (prefill / decode)
 // ---------------------------------------------------------------------------
 
 struct Generation {
@@ -576,52 +479,36 @@ Generation generate(Transformer& transformer, Tokenizer& tokenizer, Sampler& sam
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// output helpers (same formats as the golden data)
-// ---------------------------------------------------------------------------
-
-void write_ints(const std::string& path, std::span<const int> v) {
-    std::ofstream f(path);
-    if (!f) { throw std::runtime_error("cannot write " + path); }
-    for (int x : v) { f << x << '\n'; }
-}
-
-void write_text(const std::string& path, const std::string& s) {
-    std::ofstream f(path);
-    if (!f) { throw std::runtime_error("cannot write " + path); }
-    f << s;
-}
-
 } // namespace
 
 int main() {
     try {
         const std::string checkpoint_path = "../../stories15M.bin";
         const std::string tokenizer_path = "../../tokenizer.bin";
-        const std::string prompt = "Once upon a time";
+        const std::string prompt = "Once upon a time"; // -> [1, 9038, 2501, 263, 931]
         const int steps = 64;
 
         // Run 1: greedy decoding (temperature = 0 takes the argmax path).
         {
             Transformer transformer(checkpoint_path);
-            Tokenizer tokenizer(tokenizer_path, std::abs(transformer.config.vocab_size));
-            Sampler sampler(std::abs(transformer.config.vocab_size),
-                            /*temperature=*/0.0f, /*topp=*/0.9f, /*seed=*/42);
+            const int vocab_size = std::abs(transformer.checkpoint.config.vocab_size);
+            Tokenizer tokenizer(tut::load_vocab(tokenizer_path, vocab_size));
+            Sampler sampler(vocab_size, /*temperature=*/0.0f, /*topp=*/0.9f, /*seed=*/42);
             const Generation g = generate(transformer, tokenizer, sampler, prompt, steps);
-            write_ints("out_ids.txt", g.ids);
-            write_text("out_text.txt", g.text + '\n');
+            tut::write_ints("out_ids.txt", g.ids);
+            tut::write_text("out_text.txt", g.text + '\n'); // golden files end with a newline
             std::cout << "greedy:  " << g.ids.size() << " tokens -> out_ids.txt / out_text.txt\n";
         }
 
         // Run 2: sampled decoding (temperature = 0.8, top-p = 0.9, seed = 42).
         {
             Transformer transformer(checkpoint_path);
-            Tokenizer tokenizer(tokenizer_path, std::abs(transformer.config.vocab_size));
-            Sampler sampler(std::abs(transformer.config.vocab_size),
-                            /*temperature=*/0.8f, /*topp=*/0.9f, /*seed=*/42);
+            const int vocab_size = std::abs(transformer.checkpoint.config.vocab_size);
+            Tokenizer tokenizer(tut::load_vocab(tokenizer_path, vocab_size));
+            Sampler sampler(vocab_size, /*temperature=*/0.8f, /*topp=*/0.9f, /*seed=*/42);
             const Generation g = generate(transformer, tokenizer, sampler, prompt, steps);
-            write_ints("out_sids.txt", g.ids);
-            write_text("out_stext.txt", g.text + '\n');
+            tut::write_ints("out_sids.txt", g.ids);
+            tut::write_text("out_stext.txt", g.text + '\n'); // golden files end with a newline
             std::cout << "sampled: " << g.ids.size() << " tokens -> out_sids.txt / out_stext.txt\n";
         }
     } catch (const std::exception& e) {

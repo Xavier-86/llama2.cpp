@@ -1,66 +1,60 @@
-// 04 matmul: student template.
-// W (d,n) @ x (n,) -> xout (d,), W stored row-major (d rows of n floats).
-// Build: c++ -O2 -std=c++20 -o main main.cpp
-// Run from the module folder; writes out.txt.
+// 04_matmul — student template
+//
+// The matrix-vector multiply that dominates llama2 inference: every linear
+// projection (wq/wk/wv/wo, w1/w2/w3, the classifier) is one call to this
+// kernel. Under 10 lines — see README.md for the math and the conventions.
+//
+// The inputs are const arrays below (a 3x4 toy matrix and a 4-dim vector) —
+// no file parsing needed. The output goes to out.txt so you can verify it
+// against data/expected_out.txt with ../tools/compare.py.
+//
+// Build:  c++ -O2 -std=c++20 -o main main.cpp
+// Run:    ./main
+// Verify: python3 ../tools/compare.py out.txt data/expected_out.txt
 
-#include <cstddef>
-#include <fstream>
-#include <iomanip>
+#include <algorithm>
 #include <iostream>
 #include <span>
-#include <stdexcept>
-#include <string>
-#include <vector>
 
-// Load all whitespace-separated floats from a text file (one number per line).
-static std::vector<float> load_vector(const std::string& path) {
-    std::ifstream in(path);
-    if (!in) { throw std::runtime_error("cannot open " + path); }
-    std::vector<float> v;
-    float value;
-    while (in >> value) { v.push_back(value); }
-    return v;
-}
+#include "../common/io.h"
 
-// Write floats one per line, matching the golden data format (%.3e).
-static void write_vector(const std::string& path, std::span<const float> v) {
-    std::ofstream out(path);
-    if (!out) { throw std::runtime_error("cannot write " + path); }
-    out << std::scientific << std::setprecision(3);
-    for (float value : v) { out << value << '\n'; }
-}
+// ---------------------------------------------------------------------------
+// Toy input: a 3x4 weight matrix (row-major) and a 4-dim activation vector
+// ---------------------------------------------------------------------------
 
-// W (d,n) @ x (n,) -> xout (d,); w holds d rows of n elements.
-static void matmul(std::span<float> xout, std::span<const float> x, std::span<const float> w) {
-    const size_t n = x.size();
-    const size_t d = xout.size();
-    (void)n;
-    (void)d;
-    (void)w;
+constexpr int kD = 3; // output size: number of rows of W
+constexpr int kN = 4; // input size: length of each row of W
+
+// Row-major: kW[i*kN + j] is the weight connecting input j to output i.
+// Same values as data/input_w.txt.
+const float kW[] = {
+    0.5f, -1.25f, 2.0f, 0.75f,   // row 0 -> out[0]
+    -3.0f, 0.125f, 1.5f, -0.5f,  // row 1 -> out[1]
+    2.25f, -0.75f, 0.875f, -2.0f // row 2 -> out[2]
+};
+
+// The activation vector, same values as data/input_x.txt.
+const float kX[] = {0.5f, -1.0f, 2.0f, 0.25f};
+
+// ---------------------------------------------------------------------------
+// The one kernel of this module
+// ---------------------------------------------------------------------------
+
+void matmul(std::span<float> xout, std::span<const float> x, std::span<const float> w) {
     // TODO(task 1): implement the matrix-vector multiply defined in README.md:
-    // each output element is the dot product of one row of W with x.
-    // Accumulate in float (not double) to match the reference behavior.
-    std::fill(xout.begin(), xout.end(), 0.0f); // stub: all zeros
+    //   each output element is the dot product of one row of W with x, i.e.
+    //   xout[i] = sum_j w[i*n + j] * x[j], where n = x.size(). Accumulate in
+    //   float (not double) to match the golden data. Verified by out.txt.
+    std::ranges::fill(xout, 0.0f); // stub: replace with your code
+    (void)w;
 }
+
+// ---------------------------------------------------------------------------
 
 int main() {
-    try {
-        // data/input_w.txt is a 3x4 matrix (row-major), data/input_x.txt a 4-dim vector.
-        const std::vector<float> x = load_vector("data/input_x.txt");
-        const std::vector<float> w = load_vector("data/input_w.txt");
-        const size_t n = x.size();
-        if (n == 0 || w.size() % n != 0) {
-            throw std::runtime_error("bad input sizes: w has " + std::to_string(w.size()) +
-                                     " values, x has " + std::to_string(n));
-        }
-        const size_t d = w.size() / n;
-
-        std::vector<float> xout(d);
-        matmul(xout, x, w);
-        write_vector("out.txt", xout);
-    } catch (const std::exception& e) {
-        std::cerr << "error: " << e.what() << '\n';
-        return 1;
-    }
+    float xout[kD];
+    matmul(xout, kX, kW);
+    tut::write_floats("out.txt", xout);
+    std::cout << "wrote out.txt\n";
     return 0;
 }

@@ -5,7 +5,7 @@
 //   * softmax: numerically stable (subtract max first), in place
 //
 // Build:  c++ -O2 -std=c++20 -o solution solution.cpp
-// Run:    ./solution        (from this folder; needs ../../stories15M.bin)
+// Run:    ./solution
 // Verify: python3 ../tools/compare.py out.txt      data/expected_rmsnorm.txt
 //         python3 ../tools/compare.py out_real.txt data/expected_rmsnorm_real.txt
 //         python3 ../tools/compare.py out_sm.txt   data/expected_softmax.txt
@@ -13,65 +13,26 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <span>
-#include <stdexcept>
-#include <string>
-#include <vector>
+
+#include "../common/io.h"
+#include "data.h"
 
 // ---------------------------------------------------------------------------
-// IO helpers
+// Model constants (stories15M) and toy input vectors
 // ---------------------------------------------------------------------------
 
-// Read a whitespace-separated list of floats (data files hold one per line).
-static std::vector<float> read_floats(const std::string& path) {
-    std::ifstream f(path);
-    if (!f) { throw std::runtime_error("cannot open " + path); }
-    std::vector<float> v;
-    float x;
-    while (f >> x) { v.push_back(x); }
-    return v;
-}
+constexpr int kDim = 288; // model width; the real case below works at this size
 
-// Write floats one per line in the golden-data format (%.3e).
-static void write_floats(const std::string& path, std::span<const float> v) {
-    std::ofstream f(path);
-    if (!f) { throw std::runtime_error("cannot write " + path); }
-    f << std::scientific << std::setprecision(3);
-    for (float x : v) { f << x << '\n'; }
-}
+// Toy 8-dim RMSNorm case: input and learned weight.
+const float kRmsXToy[] = {0.5f, -1.2f, 3.3f, 0.0f, 1e-3f, -2.7f, 4.0f, -0.8f};
+const float kRmsWToy[] = {1.1f, 0.9f, -0.5f, 2.0f, 1.0f, 0.3f, -1.4f, 0.7f};
 
-// ---------------------------------------------------------------------------
-// Minimal checkpoint access (module 01 describes the full format)
-// ---------------------------------------------------------------------------
-
-struct Config {
-    int32_t dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len;
-};
-
-static Config read_config(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) { throw std::runtime_error("cannot open " + path); }
-    Config c{};
-    f.read(reinterpret_cast<char*>(&c), sizeof(c));
-    if (!f) { throw std::runtime_error("failed reading config from " + path); }
-    return c;
-}
-
-// Load `count` floats starting at float offset `offset` in the weight region
-// (offset 0 = first float right after the 7xint32 config header).
-static std::vector<float> load_weight_slice(const std::string& path, size_t offset, size_t count) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) { throw std::runtime_error("cannot open " + path); }
-    f.seekg(static_cast<std::streamoff>(sizeof(Config) + offset * sizeof(float)));
-    std::vector<float> v(count);
-    f.read(reinterpret_cast<char*>(v.data()), static_cast<std::streamsize>(count * sizeof(float)));
-    if (!f) { throw std::runtime_error("failed reading weights from " + path); }
-    return v;
-}
+// Ordinary 8-dim softmax case, and a ~1000 case that exercises the
+// max-subtraction trick (values like exp(1000) overflow to inf without it).
+const float kSoftmaxIn[] = {1.0f, 2.0f, 3.0f, 4.0f, -1.0f, 0.0f, 0.5f, -2.0f};
+const float kSoftmaxBig[] = {1000.0f, 1001.0f, 1002.0f, 999.0f};
 
 // ---------------------------------------------------------------------------
 // The two kernels of this module
@@ -102,51 +63,36 @@ void softmax(std::span<float> x) {
 // ---------------------------------------------------------------------------
 
 int main() {
-    try {
-        // Case 1: 8-dim toy RMSNorm -> out.txt
-        {
-            const std::vector<float> x = read_floats("data/input_rmsnorm_x.txt");
-            const std::vector<float> w = read_floats("data/input_rmsnorm_w.txt");
-            std::vector<float> o(x.size());
-            rmsnorm(o, x, w);
-            write_floats("out.txt", o);
-        }
-
-        // Case 2: real 288-dim RMSNorm with layer-0 rms_att_weight -> out_real.txt
-        {
-            const std::string ckpt = "../../stories15M.bin";
-            const Config c = read_config(ckpt);
-            const size_t dim = static_cast<size_t>(c.dim);
-            // A negative vocab_size marks unshared classifier weights; the
-            // embedding table has abs(vocab_size) rows either way.
-            const size_t vocab = static_cast<size_t>(
-                c.vocab_size < 0 ? -static_cast<int64_t>(c.vocab_size) : c.vocab_size);
-            // rms_att_weight sits right after token_embedding_table
-            // (vocab_size x dim); layer 0 = offset 0 within it, length dim.
-            const std::vector<float> w = load_weight_slice(ckpt, vocab * dim, dim);
-            const std::vector<float> x = read_floats("data/input_rmsnorm_x_real.txt");
-            std::vector<float> o(x.size());
-            rmsnorm(o, x, w);
-            write_floats("out_real.txt", o);
-        }
-
-        // Case 3: ordinary 8-dim softmax -> out_sm.txt
-        {
-            std::vector<float> x = read_floats("data/input_softmax.txt");
-            softmax(x);
-            write_floats("out_sm.txt", x);
-        }
-
-        // Case 4: values around 1000, exercises the max-subtraction -> out_big.txt
-        {
-            std::vector<float> x = read_floats("data/input_softmax_big.txt");
-            softmax(x);
-            write_floats("out_big.txt", x);
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "error: " << e.what() << '\n';
-        return 1;
+    // Case 1: 8-dim toy RMSNorm -> out.txt
+    {
+        float o[8];
+        rmsnorm(o, kRmsXToy, kRmsWToy);
+        tut::write_floats("out.txt", o);
     }
+
+    // Case 2: real 288-dim RMSNorm with layer-0 rms_att_weight -> out_real.txt
+    {
+        float o[kDim];
+        rmsnorm(o, kRmsNormXReal, kRmsNormWReal);
+        tut::write_floats("out_real.txt", o);
+    }
+
+    // Case 3: ordinary 8-dim softmax -> out_sm.txt
+    {
+        float x[8];
+        std::ranges::copy(kSoftmaxIn, x);
+        softmax(x);
+        tut::write_floats("out_sm.txt", x);
+    }
+
+    // Case 4: values around 1000, exercises the max-subtraction -> out_big.txt
+    {
+        float x[4];
+        std::ranges::copy(kSoftmaxBig, x);
+        softmax(x);
+        tut::write_floats("out_big.txt", x);
+    }
+
     std::cout << "wrote out.txt out_real.txt out_sm.txt out_big.txt\n";
     return 0;
 }

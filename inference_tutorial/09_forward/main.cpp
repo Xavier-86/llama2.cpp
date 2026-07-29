@@ -1,140 +1,52 @@
-// 08_forward -- full single-step forward pass, FP32 (reference solution)
+// 09_forward -- full single-step forward pass, FP32 (student template)
 //
-// Assembles modules 01-07 into forward(token, pos) -> logits:
-//   x = embedding[token]                                        (01)
-//   per layer: rmsnorm -> qkv matmuls -> cache k/v -> rope -> attention
-//              -> wo projection + residual -> rmsnorm -> ffn + residual
-//              (03 / 04 / 05 / 06 / 07)
-//   final rmsnorm -> classifier matmul (shared embedding table)
-// The 5 prompt tokens from data/input_tokens.txt are run as a prefill
+// Assembles the ONE-layer block of module 08_transformer_layer into the
+// complete forward(token, pos) -> logits:
+//   x = embedding[token]                                        (given)
+//   for l in 0..n_layers-1: the transformer layer of module 08  (task 1)
+//   final rmsnorm -> classifier matmul (shared embedding table) (task 2, 3)
+// The 5 prompt tokens of kTokens below are run as a prefill
 // (positions 0..4); each position's logits (32000 values) and argmax are
 // collected, logits written position-major.
 //
-// Build:  c++ -O2 -std=c++20 -o solution solution.cpp
-// Run:    ./solution            (from this module folder)
+// Checkpoint parsing and golden-data IO live in ../common/*.h (given); this
+// file keeps only the algorithms. The six kernels (rmsnorm / softmax /
+// matmul / rope / attention / ffn) and the single-layer assembly are GIVEN:
+// you already implemented them in modules 03-07 and 08_transformer_layer.
+// The new work of this module is stacking the layer 6 times and adding the
+// output head.
+//
+// Build:  c++ -O2 -std=c++20 -o main main.cpp
+// Run:    ./main                (from this module folder)
 // Verify: python3 ../tools/compare.py out_argmax.txt data/expected_argmax.txt --exact
 //         python3 ../tools/compare.py out_logits.txt data/expected_logits.txt
+// Compare argmax first: if it matches, the information flow is basically
+// right. Logit diffs up to ~1e-3 are normal (summation order).
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "../common/checkpoint.h"
+#include "../common/io.h"
+
 namespace {
 
 // ---------------------------------------------------------------------------
-// Module 01: checkpoint loading
+// Prompt input: "Once upon a time" tokenized, with the <s> start token.
+// (Same values as data/input_tokens.txt.)
 // ---------------------------------------------------------------------------
 
-// checkpoint header: 7 x int32, in this exact order
-struct Config {
-    int32_t dim;
-    int32_t hidden_dim;
-    int32_t n_layers;
-    int32_t n_heads;
-    int32_t n_kv_heads;
-    int32_t vocab_size; // negative marks unshared classifier weights
-    int32_t seq_len;
-};
-
-// each tensor is a view into the weight region -- no copies
-struct Weights {
-    std::span<const float> token_embedding_table;
-    std::span<const float> rms_att_weight;
-    std::span<const float> wq;
-    std::span<const float> wk;
-    std::span<const float> wv;
-    std::span<const float> wo;
-    std::span<const float> rms_ffn_weight;
-    std::span<const float> w1;
-    std::span<const float> w2;
-    std::span<const float> w3;
-    std::span<const float> rms_final_weight;
-    std::span<const float> wcls;
-};
-
-// Load the whole checkpoint and carve the 11 tensors in file order.
-std::vector<float> load_checkpoint(const std::string& path, Config& cfg, Weights& w) {
-    std::ifstream in(path, std::ios::binary | std::ios::ate);
-    if (!in) { throw std::runtime_error("cannot open " + path); }
-    const std::streamsize file_bytes = in.tellg();
-    in.seekg(0);
-    std::vector<float> buf(static_cast<size_t>(file_bytes) / sizeof(float));
-    in.read(reinterpret_cast<char*>(buf.data()), file_bytes);
-    if (!in) { throw std::runtime_error("failed to read " + path); }
-
-    std::memcpy(&cfg, buf.data(), sizeof(cfg));
-
-    const bool shared = cfg.vocab_size > 0;
-    const size_t vocab = shared ? cfg.vocab_size : -cfg.vocab_size;
-    const size_t dim = cfg.dim;
-    const size_t hidden = cfg.hidden_dim;
-    const size_t n_layers = cfg.n_layers;
-    const size_t head_size = dim / cfg.n_heads;
-    const size_t kv_dim = cfg.n_kv_heads * head_size;
-
-    const float* ptr = buf.data() + sizeof(Config) / sizeof(float);
-    auto carve = [&ptr](size_t count) {
-        std::span<const float> slice{ptr, count};
-        ptr += count;
-        return slice;
-    };
-    w.token_embedding_table = carve(vocab * dim);
-    w.rms_att_weight = carve(n_layers * dim);
-    w.wq = carve(n_layers * dim * dim);
-    w.wk = carve(n_layers * dim * kv_dim);
-    w.wv = carve(n_layers * dim * kv_dim);
-    w.wo = carve(n_layers * dim * dim);
-    w.rms_ffn_weight = carve(n_layers * dim);
-    w.w1 = carve(n_layers * hidden * dim);
-    w.w2 = carve(n_layers * dim * hidden);
-    w.w3 = carve(n_layers * hidden * dim);
-    w.rms_final_weight = carve(dim);
-    // legacy precomputed RoPE tables, unused: just skip them
-    ptr += static_cast<size_t>(cfg.seq_len) * head_size / 2;
-    ptr += static_cast<size_t>(cfg.seq_len) * head_size / 2;
-    w.wcls = shared ? w.token_embedding_table : carve(vocab * dim);
-    return buf; // keeps the weight region alive; the spans point into it
-}
-
-// ---------------------------------------------------------------------------
-// IO helpers
-// ---------------------------------------------------------------------------
-
-// Load whitespace-separated integers, one per line.
-std::vector<int> load_ints(const std::string& path) {
-    std::ifstream in(path);
-    if (!in) { throw std::runtime_error("cannot open " + path); }
-    std::vector<int> v;
-    int x;
-    while (in >> x) { v.push_back(x); }
-    return v;
-}
-
-// Write floats one per line, matching the golden data format (%.3e).
-void write_floats(const std::string& path, std::span<const float> v) {
-    std::ofstream out(path);
-    if (!out) { throw std::runtime_error("cannot write " + path); }
-    out << std::scientific << std::setprecision(3);
-    for (float value : v) { out << value << '\n'; }
-}
-
-// Write integers one per line.
-void write_ints(const std::string& path, std::span<const int> v) {
-    std::ofstream out(path);
-    if (!out) { throw std::runtime_error("cannot write " + path); }
-    for (int value : v) { out << value << '\n'; }
-}
+const int kTokens[] = {1, 9038, 2501, 263, 931}; // P = 5 prompt tokens
 
 // ---------------------------------------------------------------------------
 // Modules 03 + 04: the small math kernels
+// (given: you implemented these in modules 03 and 04)
 // ---------------------------------------------------------------------------
 
 // out_i = weight_i * x_i / sqrt(mean(x^2) + eps); all arithmetic in float.
@@ -173,6 +85,7 @@ void matmul(std::span<float> xout, std::span<const float> x, std::span<const flo
 
 // ---------------------------------------------------------------------------
 // Module 05: rotary position embedding, in place
+// (given: you implemented this in module 05)
 // ---------------------------------------------------------------------------
 
 // Rotate adjacent pairs of q (all dim pairs) and k (first kv_dim pairs)
@@ -202,6 +115,7 @@ void rope(std::span<float> q, std::span<float> k, int pos, int head_size) {
 
 // ---------------------------------------------------------------------------
 // Module 06: multi-head causal attention for a single position
+// (given: you implemented this in module 06)
 // ---------------------------------------------------------------------------
 
 //   out:     this position's attention output (dim,), heads concatenated
@@ -247,6 +161,7 @@ void attention(std::span<float> out, std::span<float> att, std::span<const float
 
 // ---------------------------------------------------------------------------
 // Module 07: SwiGLU feed-forward network
+// (given: you implemented this in module 07)
 // ---------------------------------------------------------------------------
 
 // out = W2 @ (silu(W1 @ x) * (W3 @ x)); hb/hb2 are (hidden,) scratch buffers.
@@ -267,7 +182,7 @@ void ffn(std::span<float> out, std::span<const float> x, std::span<const float> 
 }
 
 // ---------------------------------------------------------------------------
-// Run state: activations + KV cache, sized from the config
+// Run state: activations + KV cache, sized from the config (given)
 // ---------------------------------------------------------------------------
 
 struct RunState {
@@ -282,7 +197,7 @@ struct RunState {
     std::vector<float> value_cache; // (n_layers, seq_len, kv_dim)
     std::vector<float> logits;      // (vocab_size,)
 
-    explicit RunState(const Config& c) {
+    explicit RunState(const tut::Config& c) {
         const size_t dim = c.dim;
         const size_t hidden = c.hidden_dim;
         const size_t kv_dim = static_cast<size_t>(c.n_kv_heads) * (c.dim / c.n_heads);
@@ -301,100 +216,116 @@ struct RunState {
 };
 
 // ---------------------------------------------------------------------------
-// The assembly: one token at one position -> logits for the next token
+// ONE transformer layer at layer index l, for the token already embedded in
+// s.x at position pos (given: this is exactly what you assembled in module
+// 08_transformer_layer, now parameterized by l -- note the weight and cache
+// slice offsets, all proportional to l)
 // ---------------------------------------------------------------------------
 
-std::span<const float> forward(int token, int pos, const Config& p, const Weights& w,
-                               RunState& s) {
+void transformer_layer(int64_t l, int pos, const tut::Config& p, const tut::Weights& w,
+                       RunState& s) {
     const size_t dim = p.dim;
-    const size_t kvd = static_cast<size_t>(p.n_kv_heads) * (p.dim / p.n_heads);
+    const size_t kvd = static_cast<size_t>(p.n_kv_heads) * (p.dim / p.n_heads); // kv_dim
     const int kv_mul = p.n_heads / p.n_kv_heads; // kv sharing factor (1 here)
     const int head_size = p.dim / p.n_heads;
+    const size_t layer = static_cast<size_t>(l);
+    const size_t loff = layer * static_cast<size_t>(p.seq_len) * kvd;
 
     std::span<float> x{s.x};
 
-    // embedding lookup: copy this token's row of the table into x
+    // This layer's cache, and the k/v rows of the current position inside
+    // it -- the "cache": k/v of previous positions are read back, not
+    // recomputed.
+    std::span<float> k_layer{s.key_cache.data() + loff,
+                             static_cast<size_t>(p.seq_len) * kvd};
+    std::span<float> v_layer{s.value_cache.data() + loff,
+                             static_cast<size_t>(p.seq_len) * kvd};
+    std::span<float> k = k_layer.subspan(static_cast<size_t>(pos) * kvd, kvd);
+    std::span<float> v = v_layer.subspan(static_cast<size_t>(pos) * kvd, kvd);
+
+    // pre-norm, then qkv projections; k/v are written straight into the cache
+    rmsnorm(s.xb, x, w.rms_att_weight.subspan(layer * dim, dim));
+    matmul(s.q, s.xb, w.wq.subspan(layer * dim * dim, dim * dim));
+    matmul(k, s.xb, w.wk.subspan(layer * dim * kvd, dim * kvd));
+    matmul(v, s.xb, w.wv.subspan(layer * dim * kvd, dim * kvd));
+
+    // RoPE: rotate q and the just-cached k row in place
+    rope(s.q, k, pos, head_size);
+
+    // multi-head attention over the cached rows 0..pos
+    attention(s.xb, s.att, s.q, k_layer, v_layer, pos, p.n_heads, head_size, kv_mul);
+
+    // attention output projection + residual connection
+    matmul(s.xb2, s.xb, w.wo.subspan(layer * dim * dim, dim * dim));
+    for (size_t i = 0; i < dim; i++) { x[i] += s.xb2[i]; }
+
+    // pre-norm, then the SwiGLU ffn + residual connection
+    rmsnorm(s.xb, x, w.rms_ffn_weight.subspan(layer * dim, dim));
+    const size_t hidden = p.hidden_dim;
+    ffn(s.xb, s.xb, w.w1.subspan(layer * dim * hidden, dim * hidden),
+        w.w2.subspan(layer * dim * hidden, dim * hidden),
+        w.w3.subspan(layer * dim * hidden, dim * hidden), s.hb, s.hb2);
+    for (size_t i = 0; i < dim; i++) { x[i] += s.xb[i]; }
+}
+
+// ---------------------------------------------------------------------------
+// The full assembly: one token at one position -> logits for the next token
+// (this is the new work of module 09 -- everything above is given)
+// ---------------------------------------------------------------------------
+
+std::span<const float> forward(int token, int pos, const tut::Config& p,
+                               const tut::Weights& w, RunState& s) {
+    const size_t dim = p.dim;
+    (void)dim; // remove once used
+
+    // given: embedding lookup -- copy this token's row of the table into s.x
     std::ranges::copy(w.token_embedding_table.subspan(static_cast<size_t>(token) * dim, dim),
-                      x.begin());
+                      s.x.begin());
 
-    for (int64_t l = 0; l < p.n_layers; l++) {
-        const size_t layer = static_cast<size_t>(l);
-        const size_t loff = layer * static_cast<size_t>(p.seq_len) * kvd;
+    // TODO(task 1): stack the layers -- call transformer_layer(l, pos, p, w, s)
+    //   for every l in 0 .. p.n_layers-1, in order. (transformer_layer is
+    //   given; it already slices layer l's weights at l * per-layer size and
+    //   layer l's cache at l * seq_len * kv_dim -- your job is only the loop.)
 
-        // This layer's cache, and the k/v rows of the current position inside
-        // it -- the "cache": k/v of previous positions are read back, not
-        // recomputed.
-        std::span<float> k_layer{s.key_cache.data() + loff,
-                                 static_cast<size_t>(p.seq_len) * kvd};
-        std::span<float> v_layer{s.value_cache.data() + loff,
-                                 static_cast<size_t>(p.seq_len) * kvd};
-        std::span<float> k = k_layer.subspan(static_cast<size_t>(pos) * kvd, kvd);
-        std::span<float> v = v_layer.subspan(static_cast<size_t>(pos) * kvd, kvd);
+    // TODO(task 2): final rmsnorm, in place on s.x, with w.rms_final_weight.
 
-        // pre-norm, then qkv projections; k/v are written straight into the cache
-        rmsnorm(s.xb, x, w.rms_att_weight.subspan(layer * dim, dim));
-        matmul(s.q, s.xb, w.wq.subspan(layer * dim * dim, dim * dim));
-        matmul(k, s.xb, w.wk.subspan(layer * dim * kvd, dim * kvd));
-        matmul(v, s.xb, w.wv.subspan(layer * dim * kvd, dim * kvd));
+    // TODO(task 3): classifier head -- matmul(s.logits, s.x, w.wcls)
+    //   (wcls is the shared embedding table for this model).
 
-        // RoPE: rotate q and the just-cached k row in place
-        rope(s.q, k, pos, head_size);
-
-        // multi-head attention over the cached rows 0..pos
-        attention(s.xb, s.att, s.q, k_layer, v_layer, pos, p.n_heads, head_size, kv_mul);
-
-        // attention output projection + residual connection
-        matmul(s.xb2, s.xb, w.wo.subspan(layer * dim * dim, dim * dim));
-        for (size_t i = 0; i < dim; i++) { x[i] += s.xb2[i]; }
-
-        // pre-norm, then the SwiGLU ffn + residual connection
-        rmsnorm(s.xb, x, w.rms_ffn_weight.subspan(layer * dim, dim));
-        const size_t hidden = p.hidden_dim;
-        ffn(s.xb, s.xb, w.w1.subspan(layer * dim * hidden, dim * hidden),
-            w.w2.subspan(layer * dim * hidden, dim * hidden),
-            w.w3.subspan(layer * dim * hidden, dim * hidden), s.hb, s.hb2);
-        for (size_t i = 0; i < dim; i++) { x[i] += s.xb[i]; }
-    }
-
-    // final rmsnorm (in place) + classifier head (shared embedding table)
-    rmsnorm(x, x, w.rms_final_weight);
-    matmul(s.logits, x, w.wcls);
-    return s.logits;
+    return s.logits; // stub: all zeros until the tasks above are done
 }
 
 } // namespace
 
 int main() {
     try {
-        const std::vector<int> tokens = load_ints("data/input_tokens.txt");
-        if (tokens.empty()) { throw std::runtime_error("no input tokens"); }
-
-        Config cfg;
-        Weights w;
-        // the buffer must stay alive: all weight spans point into it
-        const std::vector<float> buf = load_checkpoint("../../stories15M.bin", cfg, w);
+        // the checkpoint owns the weight buffer; all weight spans point into it
+        const tut::Checkpoint ckpt = tut::load_checkpoint("../../stories15M.bin");
+        const tut::Config& cfg = ckpt.config;
+        const tut::Weights& w = ckpt.weights;
         const size_t vocab = cfg.vocab_size < 0 ? -cfg.vocab_size : cfg.vocab_size;
         RunState s(cfg);
 
+        constexpr size_t num_tokens = sizeof(kTokens) / sizeof(kTokens[0]);
         std::vector<float> all_logits;
-        all_logits.reserve(tokens.size() * vocab);
+        all_logits.reserve(num_tokens * vocab);
         std::vector<int> argmax;
-        argmax.reserve(tokens.size());
+        argmax.reserve(num_tokens);
 
         // prefill: one forward call per prompt token, positions 0..P-1
-        for (size_t pos = 0; pos < tokens.size(); pos++) {
+        for (size_t pos = 0; pos < num_tokens; pos++) {
             std::span<const float> logits =
-                forward(tokens[pos], static_cast<int>(pos), cfg, w, s);
+                forward(kTokens[pos], static_cast<int>(pos), cfg, w, s);
             all_logits.insert(all_logits.end(), logits.begin(), logits.end());
-            // greedy argmax (module 09's temperature == 0 case)
+            // greedy argmax (module 10's temperature == 0 case)
             argmax.push_back(
                 static_cast<int>(std::ranges::max_element(logits) - logits.begin()));
         }
 
-        write_floats("out_logits.txt", all_logits); // position-major: P x vocab
-        write_ints("out_argmax.txt", argmax);
+        tut::write_floats("out_logits.txt", all_logits); // position-major: P x vocab
+        tut::write_ints("out_argmax.txt", argmax);
 
-        std::cout << "wrote out_logits.txt (" << tokens.size() << " x " << vocab
+        std::cout << "wrote out_logits.txt (" << num_tokens << " x " << vocab
                   << ") and out_argmax.txt (" << argmax.size() << ")\n";
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << '\n';

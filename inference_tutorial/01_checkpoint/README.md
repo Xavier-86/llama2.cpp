@@ -3,7 +3,12 @@
 [← All modules](../README.md) · [Project README](../../README.md)
 
 > Goal: understand the `stories15M.bin` file format and map the 11 weight
-> tensors out of it. Everything later pulls weights from here.
+> tensors out of it.
+>
+> This is the only module dedicated to binary parsing. Later modules never
+> parse files themselves: when they need weights they call
+> `tut::load_checkpoint()` from `common/checkpoint.h` — the packaged version
+> of this module's answer. So it pays to understand the format thoroughly here.
 
 ## File format (llama2.c FP32 checkpoint)
 

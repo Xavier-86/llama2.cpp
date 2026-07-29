@@ -1,28 +1,29 @@
-// 06_attention -- multi-head causal attention with a KV cache (reference solution)
+// 06_attention — multi-head causal attention with a KV cache (reference solution)
 //
 // For each position pos = 0..4, splits the rotated Q into n_heads heads and,
 // per head, scores it against the K cache rows 0..pos, softmaxes the scores,
 // and returns the attention-weighted sum of the V cache rows 0..pos. Head
 // outputs are concatenated back into a dim vector (before the wo projection).
-// Data layout: position-major, P=5 positions x 288 values per file.
-// Reads data/input_q.txt / data/input_k_cache.txt / data/input_v_cache.txt,
-// writes out.txt / out_att.txt.
+// Inputs are the const arrays kQ / kKCache / kVCache in data.h (position-major,
+// P=5 x 288 each); writes out.txt / out_att.txt.
 //
 // Build:  c++ -O2 -std=c++20 -o solution solution.cpp
-// Run:    ./solution        (from this folder)
+// Run:    ./solution
 // Verify: python3 ../tools/compare.py out.txt     data/expected_out.txt
 //         python3 ../tools/compare.py out_att.txt data/expected_att_weights_lastpos.txt
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <span>
-#include <string>
 #include <vector>
 
-namespace {
+#include "../common/io.h"
+#include "data.h"
+
+// ---------------------------------------------------------------------------
+// Model constants (stories15M)
+// ---------------------------------------------------------------------------
 
 constexpr int kDim = 288;       // model dim
 constexpr int kNumHeads = 6;    // query heads
@@ -31,25 +32,9 @@ constexpr int kKvMul = 1;       // n_heads / n_kv_heads; > 1 only for GQA models
 constexpr int kKvDim = 288;     // n_kv_heads * head_size; == dim here
 constexpr int kPositions = 5;   // positions in the golden data
 
-// Load whitespace-separated floats, one per line.
-std::vector<float> load(const std::string& path) {
-    std::ifstream in(path);
-    if (!in) {
-        std::cerr << "cannot open " << path << "\n";
-        std::exit(1);
-    }
-    std::vector<float> v;
-    float x;
-    while (in >> x) v.push_back(x);
-    return v;
-}
-
-// Save floats in the project's golden format: %.3e, one per line.
-void save(const std::string& path, std::span<const float> v) {
-    std::ofstream out(path);
-    out << std::scientific << std::setprecision(3);
-    for (float x : v) out << x << '\n';
-}
+// ---------------------------------------------------------------------------
+// softmax (from module 03) and the attention kernel
+// ---------------------------------------------------------------------------
 
 // In-place and numerically stable: subtract the max before exp.
 void softmax(std::span<float> x) {
@@ -102,30 +87,20 @@ void attention(std::span<float> out, std::span<float> att, std::span<const float
     }
 }
 
-}  // namespace
+// ---------------------------------------------------------------------------
 
 int main() {
-    std::vector<float> q = load("data/input_q.txt");
-    std::vector<float> k_cache = load("data/input_k_cache.txt");
-    std::vector<float> v_cache = load("data/input_v_cache.txt");
-    if (q.size() != kPositions * kDim || k_cache.size() != kPositions * kKvDim ||
-        v_cache.size() != kPositions * kKvDim) {
-        std::cerr << "unexpected input size: q=" << q.size() << " k=" << k_cache.size()
-                  << " v=" << v_cache.size() << "\n";
-        return 1;
-    }
-
-    std::vector<float> out(kPositions * kDim, 0.0f);
-    std::vector<float> att(static_cast<size_t>(kNumHeads) * kPositions, 0.0f);
+    float out[kPositions * kDim] = {};
+    float att[kNumHeads * kPositions] = {};
 
     // Data is position-major: position pos occupies [pos*dim, (pos+1)*dim).
     // The t = 0..pos loop grows with pos: attention cost scales linearly with
     // sequence length, which is exactly why decode caches K/V.
     for (int pos = 0; pos < kPositions; pos++) {
         attention(std::span{out}.subspan(pos * kDim, kDim), att,
-                  std::span<const float>{q}.subspan(pos * kDim, kDim), k_cache, v_cache, pos);
+                  std::span<const float>{kQ}.subspan(pos * kDim, kDim), kKCache, kVCache, pos);
     }
-    save("out.txt", out);
+    tut::write_floats("out.txt", out);
 
     // After the last call, att holds the last position's weights; dump them
     // head-major: head 0's 5 weights, then head 1's, ... (6 x 5 = 30 values).
@@ -136,7 +111,7 @@ int main() {
             att_last.push_back(att[static_cast<size_t>(h) * kPositions + t]);
         }
     }
-    save("out_att.txt", att_last);
+    tut::write_floats("out_att.txt", att_last);
 
     std::cout << "wrote out.txt (" << kPositions << " x " << kDim << ") and out_att.txt ("
               << kNumHeads << " x " << kPositions << ")\n";

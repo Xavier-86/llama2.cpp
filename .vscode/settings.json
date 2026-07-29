@@ -1,0 +1,29 @@
+{
+    "editor.semanticTokenColorCustomizations": {
+        "rules": {
+            "variable": "#9CDCFE",
+            "property": "#9CDCFE",
+            "member": "#9CDCFE"
+        }
+    },
+    "editor.tokenColorCustomizations": {
+        "textMateRules": [
+            {
+                "scope": [
+                    "variable.other.cpp",
+                    "variable.cpp",
+                    "variable.other.local.cpp",
+                    "variable.other.readwrite.cpp",
+                    "variable.other.assignment.cpp",
+                    "variable.other.property.cpp",
+                    "variable.other.object.property.cpp",
+                    "variable.other.member.cpp",
+                    "support.variable"
+                ],
+                "settings": {
+                    "foreground": "#9CDCFE"
+                }
+            }
+        ]
+    }
+}

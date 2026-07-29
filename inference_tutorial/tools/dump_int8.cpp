@@ -25,7 +25,7 @@ int main(int argc, char* argv[]) {
     Transformer tr(checkpoint);
     const Config& p = tr.config;
     const int GS = tr.GS;
-    const std::string dir = root + "/11_quantize/data/";
+    const std::string dir = root + "/12_quantize/data/";
 
     std::cout << "config: dim=" << p.dim << " hidden_dim=" << p.hidden_dim
               << " n_layers=" << p.n_layers << " n_heads=" << p.n_heads

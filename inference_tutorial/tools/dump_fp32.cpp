@@ -23,6 +23,9 @@ struct Captures {
     int total_pos = 0; // number of prompt positions P
     // per-position (pos-major): q/k before rope, q/k after rope, v, attention output
     std::vector<float> q_pre, k_pre, q_post, k_post, v_all, att_out;
+    // per-position (pos-major): x after the attention residual, x after the ffn
+    // residual (= the full layer-0 output stream)
+    std::vector<float> att_res, layer_out;
     // last position only: attention weights of all heads, ffn in/hidden/out
     std::vector<float> att_weights, ffn_in, ffn_hidden, ffn_out;
 };
@@ -113,6 +116,8 @@ std::span<float> forward_dump(Transformer& tr, int token, int pos, Captures& cap
         matmul(s.xb2, s.xb, w.wo.subspan(static_cast<size_t>(l) * dim * dim, static_cast<size_t>(dim) * dim));
         for (int i = 0; i < dim; i++) { x[i] += s.xb2[i]; }
 
+        if (l == 0) { append(cap.att_res, x.data(), dim); } // [capture] x after attention residual
+
         rmsnorm(s.xb, x, w.rms_ffn_weight.subspan(static_cast<size_t>(l) * dim, dim));
 
         if (l == 0 && pos == cap.total_pos - 1) { // [capture] ffn input
@@ -143,6 +148,8 @@ std::span<float> forward_dump(Transformer& tr, int token, int pos, Captures& cap
         }
 
         for (int i = 0; i < dim; i++) { x[i] += s.xb[i]; }
+
+        if (l == 0) { append(cap.layer_out, x.data(), dim); } // [capture] layer-0 output stream
     }
 
     rmsnorm(x, x, w.rms_final_weight);
@@ -259,6 +266,8 @@ int main(int argc, char* argv[]) {
         std::ranges::copy(tr.weights.token_embedding_table.subspan(static_cast<size_t>(T[0]) * dim, dim),
                           xr.begin());
         write_floats(dir + "input_rmsnorm_x_real.txt", xr);
+        // layer-0 rms_att_weight slice, embedded as kRmsNormWReal in 03's data.h
+        write_floats(dir + "input_rmsnorm_w_real.txt", tr.weights.rms_att_weight.subspan(0, dim));
         rmsnorm(outr, xr, tr.weights.rms_att_weight.subspan(0, dim));
         write_floats(dir + "expected_rmsnorm_real.txt", outr);
 
@@ -310,9 +319,13 @@ int main(int argc, char* argv[]) {
         write_floats(root + "/07_ffn/data/input_x.txt", cap.ffn_in);
         write_floats(root + "/07_ffn/data/expected_hidden.txt", cap.ffn_hidden);
         write_floats(root + "/07_ffn/data/expected_out.txt", cap.ffn_out);
+
+        write_ints(root + "/08_transformer_layer/data/input_tokens.txt", T);
+        write_floats(root + "/08_transformer_layer/data/expected_att_residual.txt", cap.att_res);
+        write_floats(root + "/08_transformer_layer/data/expected_layer_out.txt", cap.layer_out);
     }
 
-    // ---------------- 08_forward: original forward, plus bit-exactness check ----------------
+    // ---------------- 09_forward: original forward, plus bit-exactness check ----------------
     Transformer tr2(checkpoint);
     std::vector<float> all_logits;
     std::vector<int> argmaxes;
@@ -327,15 +340,15 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "instrumented vs original forward, max |logit diff|: " << max_diff << '\n';
     {
-        const std::string dir = root + "/08_forward/data/";
+        const std::string dir = root + "/09_forward/data/";
         write_ints(dir + "input_tokens.txt", T);
         write_floats(dir + "expected_logits.txt", all_logits);
         write_ints(dir + "expected_argmax.txt", argmaxes);
     }
 
-    // ---------------- 09_sampler ----------------
+    // ---------------- 10_sampler ----------------
     {
-        const std::string dir = root + "/09_sampler/data/";
+        const std::string dir = root + "/10_sampler/data/";
         std::vector<float> logits_last(logits_dump[P - 1]);
         write_floats(dir + "input_logits.txt", logits_last);
 
@@ -382,7 +395,7 @@ int main(int argc, char* argv[]) {
         write_ints(dir + "expected_samples.txt", samples);
     }
 
-    // ---------------- 10_generate ----------------
+    // ---------------- 11_generate ----------------
     auto run_generate = [&](float temp, float topp, std::uint64_t seed, int steps,
                             std::vector<int>& ids, std::string& text) {
         Transformer g_tr(checkpoint);
@@ -406,7 +419,7 @@ int main(int argc, char* argv[]) {
         }
     };
     {
-        const std::string dir = root + "/10_generate/data/";
+        const std::string dir = root + "/11_generate/data/";
         std::vector<int> ids;
         std::string text;
         run_generate(0.0f, 0.9f, 42, 64, ids, text);

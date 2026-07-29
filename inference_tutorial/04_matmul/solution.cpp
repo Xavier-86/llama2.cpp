@@ -1,40 +1,47 @@
-// 04 matmul: reference solution.
-// W (d,n) @ x (n,) -> xout (d,), W stored row-major (d rows of n floats).
-// Build: c++ -O2 -std=c++20 -o solution solution.cpp
-// Run from the module folder; writes out.txt.
+// 04_matmul — reference solution
+//
+// The matrix-vector multiply that dominates llama2 inference: every linear
+// projection (wq/wk/wv/wo, w1/w2/w3, the classifier) is one call to this
+// kernel.
+//
+//   xout_i = sum_j  w[i*n + j] * x[j]      (w row-major, all math in float)
+//
+// Build:  c++ -O2 -std=c++20 -o solution solution.cpp
+// Run:    ./solution
+// Verify: python3 ../tools/compare.py out.txt data/expected_out.txt
 
-#include <cstddef>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <span>
-#include <stdexcept>
-#include <string>
-#include <vector>
 
-// Load all whitespace-separated floats from a text file (one number per line).
-static std::vector<float> load_vector(const std::string& path) {
-    std::ifstream in(path);
-    if (!in) { throw std::runtime_error("cannot open " + path); }
-    std::vector<float> v;
-    float value;
-    while (in >> value) { v.push_back(value); }
-    return v;
-}
+#include "../common/io.h"
 
-// Write floats one per line, matching the golden data format (%.3e).
-static void write_vector(const std::string& path, std::span<const float> v) {
-    std::ofstream out(path);
-    if (!out) { throw std::runtime_error("cannot write " + path); }
-    out << std::scientific << std::setprecision(3);
-    for (float value : v) { out << value << '\n'; }
-}
+// ---------------------------------------------------------------------------
+// Toy input: a 3x4 weight matrix (row-major) and a 4-dim activation vector
+// ---------------------------------------------------------------------------
 
-// W (d,n) @ x (n,) -> xout (d,); w holds d rows of n elements.
-// The vast majority of the model's runtime is spent in this small function:
-// each weight participates in exactly one multiply-add, so performance is
-// bound by memory bandwidth.
-static void matmul(std::span<float> xout, std::span<const float> x, std::span<const float> w) {
+constexpr int kD = 3; // output size: number of rows of W
+constexpr int kN = 4; // input size: length of each row of W
+
+// Row-major: kW[i*kN + j] is the weight connecting input j to output i.
+// Same values as data/input_w.txt.
+const float kW[] = {
+    0.5f, -1.25f, 2.0f, 0.75f,   // row 0 -> out[0]
+    -3.0f, 0.125f, 1.5f, -0.5f,  // row 1 -> out[1]
+    2.25f, -0.75f, 0.875f, -2.0f // row 2 -> out[2]
+};
+
+// The activation vector, same values as data/input_x.txt.
+const float kX[] = {0.5f, -1.0f, 2.0f, 0.25f};
+
+// ---------------------------------------------------------------------------
+// The one kernel of this module
+// ---------------------------------------------------------------------------
+
+// W (d,n) @ x (n,) -> xout (d,); w holds d rows of n elements, row i produces
+// xout[i]. The vast majority of the model's runtime is spent in this small
+// function: each weight participates in exactly one multiply-add, so
+// performance is bound by memory bandwidth.
+void matmul(std::span<float> xout, std::span<const float> x, std::span<const float> w) {
     const size_t n = x.size();
     const size_t d = xout.size();
     for (size_t i = 0; i < d; i++) {
@@ -45,24 +52,12 @@ static void matmul(std::span<float> xout, std::span<const float> x, std::span<co
     }
 }
 
-int main() {
-    try {
-        // data/input_w.txt is a 3x4 matrix (row-major), data/input_x.txt a 4-dim vector.
-        const std::vector<float> x = load_vector("data/input_x.txt");
-        const std::vector<float> w = load_vector("data/input_w.txt");
-        const size_t n = x.size();
-        if (n == 0 || w.size() % n != 0) {
-            throw std::runtime_error("bad input sizes: w has " + std::to_string(w.size()) +
-                                     " values, x has " + std::to_string(n));
-        }
-        const size_t d = w.size() / n;
+// ---------------------------------------------------------------------------
 
-        std::vector<float> xout(d);
-        matmul(xout, x, w);
-        write_vector("out.txt", xout);
-    } catch (const std::exception& e) {
-        std::cerr << "error: " << e.what() << '\n';
-        return 1;
-    }
+int main() {
+    float xout[kD];
+    matmul(xout, kX, kW);
+    tut::write_floats("out.txt", xout);
+    std::cout << "wrote out.txt\n";
     return 0;
 }
