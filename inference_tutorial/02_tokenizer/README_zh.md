@@ -2,60 +2,26 @@
 
 [← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
-> 目标：实现 BPE 分词器的 `encode`（文本 -> token id）和 `decode`（id -> 文本片段）。这是独立模块，不需要模型权重，只需 `../../tokenizer.bin`。
+## 总任务
 
-## 背景
-
-模型看到的不是文字，而是整数序列。tokenizer 负责两个方向的转换：
+补全 `main.cpp` 中 `Tokenizer` 类的四个 TODO，实现 BPE 分词器的两个方向：
 
 ```
-"Once upon a time"  --encode-->  [1, 9038, 2501, 263, 931]  --forward-->  logits  --sample-->  下一个 id  --decode-->  文字
+"Once upon a time"  --encode-->  [1, 9038, 2501, 263, 931]
+[1, 9038, 2501, 263, 931]     --decode-->  "Once upon a time"
 ```
 
-本模块实现的 BPE（byte-pair encoding）算法与 `../../run.cpp` 中的 `Tokenizer` 完全一致：先把文本拆成单字符 token，再按词表分数贪心合并相邻对。词表文件解析已由 `../common/tokenizer.h` 代劳，你只需要写算法。
+模型看到的不是文字，而是整数序列；tokenizer 负责文字和整数序列之间的双向转换。本模块实现的 BPE（byte-pair encoding）算法与 `../../run.cpp` 中的 `Tokenizer` 完全一致：先把文本拆成单字符 token，再按词表分数贪心合并相邻对。
 
-## tokenizer.bin 格式
+这是独立模块：不需要模型权重，只需词表文件 `../../tokenizer.bin`。词表解析已由 `tut::load_vocab(path, vocab_size)`（`../common/tokenizer.h`）完成，返回 `tut::Vocab{pieces, scores, max_token_length}`：`pieces[id]` 是 token 的文本片段，`scores[id]` 是 BPE 合并分数。
 
-```
-[max_token_length: int32]
-随后是 vocab_size（=32000）个条目，每个条目：
-  [score: float32] [len: int32] [长度为 len 字节的字符串]
-```
-
-解析由 `tut::load_vocab(path, vocab_size)`（`../common/tokenizer.h`）完成，返回 `tut::Vocab{pieces, scores, max_token_length}`：`pieces[id]` 是 token 的文本片段，`scores[id]` 是 BPE 合并分数。**解析不是本模块的学习任务**，构造 `Tokenizer` 时一行调用即可。
-
-词表约定：
-
-- id 0 = `<unk>`，id 1 = `<s>`（BOS），id 2 = `</s>`（EOS）
-- id 3..258 是 256 个单字节 token（`<0x00>`..`<0xFF>`）；字节 b 对应的 token id 为 **b + 3**
-- 其余均为 BPE 合并后的子词；`score` 越高，合并优先级越高
-
-## encode 算法
-
-输入为 `text` 以及 `bos` / `eos` 开关（本项目中 eos 始终为 false）：
-
-1. 若 `bos=true`，先加入 BOS id 1。
-2. 若文本非空，加入 `" "`（空格）的 id。Llama 约定按"文本前带一个空格"的方式分词。
-3. **逐字符查找**：按 UTF-8 边界切分——满足 `(c & 0xC0) != 0x80` 的字节是一个新字符的起点（0x80..0xBF 是续字节）；在词表中查找每个字符；若不存在，则退化为逐字节 token（`byte + 3`，即 byte fallback）。
-4. **贪心合并**：反复扫描所有相邻 token 对，把它们的字符串拼接后在词表中查找；在能找到的对中，合并 `score` 最高的一对；没有任何对可合并时停止。
-5. 若 `eos=true`，末尾加入 EOS id 2。
-
-## decode 算法
-
-`decode(prev_token, token)` 返回该 token 的字符串，并应用两条规则：
-
-- 若 `prev_token == 1`（前一个是 BOS）且片段以空格开头，去掉该空格（与 encode 步骤 2 互为逆操作）。
-- 形如 `<0xXX>`（恰好 6 个字符）的片段展开为对应的那一个字节。
-
-## 输入数据
-
-所有输入都是 main.cpp 里的 const 变量（词表除外），无需读任何数据文件：
+**输入**：main.cpp 里的 const 变量（词表除外），无需读任何数据文件：
 
 | 变量 | 位置 | 形状 | 含义 |
 | --- | --- | --- | --- |
 | `kPrompts` | main.cpp | (4,) 字符串数组 | 4 条待编码的提示词，见下表 |
 | `kDecodeIds` | main.cpp | (5,) int 数组 | 待解码的 id 序列，即提示词 0 的 token（含 BOS） |
-| `vocab_.pieces` / `vocab_.scores` | `tut::load_vocab` | (32000,) | 词表：token id -> 文本片段 / BPE 合并分数，来自 `../../tokenizer.bin` |
+| `vocab_.pieces` / `vocab_.scores` | `tut::load_vocab` | (32000,) | 词表：token id -> 文本片段 / BPE 合并分数 |
 
 4 条提示词及其预期 token id（含 BOS，即 `data/expected_encode_*.txt` 的内容）：
 
@@ -66,18 +32,58 @@
 | 2 | `Hello, world!` | `[1, 15043, 29892, 3186, 29991]` |
 | 3 | `The capital of France is` | `[1, 450, 7483, 310, 3444, 338]` |
 
-提示词 0 是整个教程的参考提示词。`data/input_prompts.txt` 和 `data/input_decode_ids.txt` 保留作参考，内容与 const 数组一致；`data/expected_*` 是黄金数据，不要修改。
+**输出**：`main()` 已经写好——编码 4 条提示词写出 `out0.txt .. out3.txt`，解码 `kDecodeIds` 写出 `out_decode.txt`。`data/expected_*` 是黄金数据，不要修改。
 
-## 任务
+## 子任务一：字符串查找 `init_sorted_vocab()` / `str_lookup(str)`
 
-补全 `main.cpp` 中 `Tokenizer` 类的四个 TODO：
+实现"字符串 -> token id"的查找：建一次排序索引（或哈希表），之后二分查找；找不到返回 -1。线性扫描也能过，但会拖慢子任务三的合并循环。
 
-1. **task 1 — `init_sorted_vocab()` / `str_lookup(str)`**：实现"字符串 -> token id"的查找：建一次排序索引（或哈希表），之后二分查找；找不到返回 -1。线性扫描也能过，但会拖慢合并循环。
-2. **task 2 — `encode` 前半**（算法步骤 1-3）：BOS、前导 `" "`、按 UTF-8 边界逐字符查找 + byte fallback。
-3. **task 3 — `encode` 后半**（算法步骤 4-5）：贪心合并 + 可选 EOS。
-4. **task 4 — `decode(prev_token, token)`**：返回 token 片段，处理 BOS 后去前导空格和 `<0xXX>` 字节展开。
+需要的知识——词表文件的格式与约定（解析已由 `tut::load_vocab` 代劳，这里只需理解查出来的东西）：
 
-`main()` 已经写好：它编码 4 条提示词写出 `out0.txt .. out3.txt`，再解码 `kDecodeIds` 写出 `out_decode.txt`。
+```
+[max_token_length: int32]
+随后是 vocab_size（=32000）个条目，每个条目：
+  [score: float32] [len: int32] [长度为 len 字节的字符串]
+```
+
+- id 0 = `<unk>`，id 1 = `<s>`（BOS），id 2 = `</s>`（EOS）
+- id 3..258 是 256 个单字节 token（`<0x00>`..`<0xFF>`）；字节 b 对应的 token id 为 **b + 3**
+- 其余均为 BPE 合并后的子词；`score` 越高，合并优先级越高
+
+## 子任务二：`encode` 前半——逐字符查找
+
+输入为 `text` 以及 `bos` 开关，按顺序做三件事：
+
+1. 若 `bos=true`，先加入 BOS id 1。
+2. 若文本非空，加入 `" "`（空格）的 id。Llama 约定按"文本前带一个空格"的方式分词。
+3. 按 UTF-8 边界把文本切成单字符，逐字符查词表；查不到则退化为逐字节 token（`byte + 3`，即 byte fallback）。
+
+需要的知识——UTF-8 边界与续字节。"按字符切分"的关键是别把一个多字节字符从中间切开。UTF-8 是变长编码：一个字符占 1~4 个字节，每种字节的最高几位是固定的：
+
+| 角色 | 位模式 | 数值范围 |
+| --- | --- | --- |
+| ASCII（1 字节字符） | `0xxxxxxx` | 0x00..0x7F |
+| 多字节字符首字节（2 字节） | `110xxxxx` | 0xC0..0xDF |
+| 首字节（3 字节） | `1110xxxx` | 0xE0..0xEF |
+| 首字节（4 字节） | `11110xxx` | 0xF0..0xF7 |
+| **续字节（continuation byte）** | `10xxxxxx` | 0x80..0xBF |
+
+续字节的高两位恒为 `10`，所以 `c & 0xC0`（只保留最高两位）等于 `0x80` 就是续字节。反过来，`(c & 0xC0) != 0x80` 的字节一定是一个新字符的起点。例子：汉字"中"编码为 3 个字节 `0xE4 0xB8 0xAD`，遍历到 `0xB8` 时 `(0xB8 & 0xC0) == 0x80`，知道它属于当前字符，继续往缓冲里拼；遍历到 `0xE4` 时条件不成立，知道这是一个新字符的起点，先清空缓冲再开始累积。
+
+## 子任务三：`encode` 后半——贪心合并
+
+对子任务二得到的 token 序列反复做合并，直到没有任何对可合并；若 `eos=true`（本项目中 eos 始终为 false），末尾加入 EOS id 2。
+
+每一轮：扫描所有相邻 token 对，把它们的字符串拼接后在词表中查找；在能找到的对中，合并 `score` 最高的一对。
+
+需要的知识：`score` 是 BPE 的合并优先级——训练时先学到的合并分数更高，所以要先合。注意查找的是**拼接后的字符串**，不是 id 对。
+
+## 子任务四：`decode(prev_token, token)`
+
+返回该 token 的字符串，并应用两条规则：
+
+- 若 `prev_token == 1`（前一个是 BOS）且片段以空格开头，去掉该空格（与子任务二的步骤 2 互为逆操作）。
+- 形如 `<0xXX>`（恰好 6 个字符）的片段展开为对应的那一个字节。
 
 ## 构建 / 运行 / 验证
 

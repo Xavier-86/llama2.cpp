@@ -2,31 +2,17 @@
 
 [← All modules](../README.md) · [Project home](../../README.md)
 
-> Goal: implement `W (d,n) @ x (n,) -> xout (d,)`. The model spends 99% of its time inside this one function.
+## Overall task
 
-## Background
-
-Every linear projection in a forward pass reduces to the same matrix-vector multiply:
-
-- attention: `wq`, `wk`, `wv`, `wo`
-- FFN: `w1`, `w2`, `w3`
-- output layer: the classifier `wcls` (weights shared with the embedding)
-
-llama2.c fixes the signature as `matmul(out, x, w)`: **output first, then the input vector, weight matrix last**. Each call projects the current activation `x` (length n) through the weight matrix `w` (shape (d,n), row-major) into the output `out` (length d). Why do weight rows correspond to output dims and not the other way around? Every weight tensor in the checkpoint is stored as (out_dim, in_dim): row i holds all the weights that produce output component i — and during the dot product that row is contiguous in memory, which is optimal for caches and bandwidth.
-
-## The math
-
-W is stored row-major: d rows of n floats each.
+Fill in the single TODO in `main.cpp` — the `matmul(xout, x, w)` kernel — implementing `W (d,n) @ x (n,) -> xout (d,)`. The model spends 99% of its time inside this one function.
 
 ```
 xout_i = sum_j  W[i*n + j] * x[j]        i = 0..d-1
 ```
 
-Row i of W dotted with x gives `xout_i`. In this module's toy example d=3, n=4; in the real model the shapes are (288, 288), (768, 288), (288, 768), (32000, 288) and so on.
+Standalone module: no model weights needed, no files to parse.
 
-## Input data
-
-All inputs are const variables in main.cpp — no files to parse:
+**Inputs**: const variables in main.cpp:
 
 | Variable | Location | Shape | Layout | Meaning | Where it comes from in the model |
 | --- | --- | --- | --- | --- | --- |
@@ -35,15 +21,23 @@ All inputs are const variables in main.cpp — no files to parse:
 
 Constants: `kD = 3` (number of output rows), `kN = 4` (input size). This module has no data.h — 16 numbers fit comfortably inline.
 
-## Tasks
+**Outputs**: `main()` is already written — it calls your kernel on kW/kX and writes `out.txt`. `data/expected_out.txt` is golden data — do not modify it.
 
-Fill in the one function in `main.cpp` (marked with `TODO`):
+## Subtask 1: `matmul(xout, x, w)`
 
-1. **task 1 — `matmul(xout, x, w)`**: apply the formula above, writing into `xout`. Here `n = x.size()`, `d = xout.size()`, and `w` holds d×n elements. Accumulate in `float` (not `double`) or the golden data won't match.
-
-`main()` is already written: it calls your kernel on kW/kX and writes `out.txt`.
+Apply the formula above, writing into `xout`. Here `n = x.size()`, `d = xout.size()`, and `w` holds d×n elements. Accumulate in `float` (not `double`) or the golden data won't match.
 
 Sanity check by hand: row 0 = `0.5*0.5 + (-1.25)*(-1.0) + 2.0*2.0 + 0.75*0.25 = 5.6875`.
+
+Background you need — where this kernel is used and why the signature looks like this. Every linear projection in a forward pass reduces to the same matrix-vector multiply:
+
+- attention: `wq`, `wk`, `wv`, `wo`
+- FFN: `w1`, `w2`, `w3`
+- output layer: the classifier `wcls` (weights shared with the embedding)
+
+llama2.c fixes the signature as `matmul(out, x, w)`: **output first, then the input vector, weight matrix last**. Each call projects the current activation `x` (length n) through the weight matrix `w` (shape (d,n), row-major) into the output `out` (length d). Why do weight rows correspond to output dims and not the other way around? Every weight tensor in the checkpoint is stored as (out_dim, in_dim): row i holds all the weights that produce output component i — and during the dot product that row is contiguous in memory, which is optimal for caches and bandwidth.
+
+Background you need — the memory layout of W. W is stored row-major: d rows of n floats each. Row i of W dotted with x gives `xout_i`. In this module's toy example d=3, n=4; in the real model the shapes are (288, 288), (768, 288), (288, 768), (32000, 288) and so on.
 
 ## Build / run / verify
 

@@ -2,11 +2,9 @@
 
 [← All modules](../README.md) · [Project home](../../README.md)
 
-> Goal: implement the two normalization functions used all over the Transformer. Each is under 10 lines.
+## Overall task
 
-## Background
-
-Both functions are called repeatedly in a single forward pass:
+Fill in the two TODOs in `main.cpp` — the two normalization kernels used all over the Transformer: `rmsnorm(o, x, weight)` and `softmax(x)`. Each is under 10 lines. Both are called repeatedly in a single forward pass:
 
 ```
 token embedding → [ RMSNorm → attention (softmax inside) → RMSNorm → FFN ] × 6 layers → RMSNorm → logits → softmax (when sampling)
@@ -14,30 +12,7 @@ token embedding → [ RMSNorm → attention (softmax inside) → RMSNorm → FFN
 
 RMSNorm normalizes vector magnitudes for numerical stability; softmax turns arbitrary scores into a probability distribution (attention weights, sampling probabilities).
 
-## The math
-
-### RMSNorm
-
-For a vector x of length n and a learned weight w:
-
-```
-ss = (1/n) * sum(x_i^2)      # mean square
-ss = 1 / sqrt(ss + 1e-5)     # eps guards against division by zero
-out_i = w_i * ss * x_i
-```
-
-### Softmax (numerically stable)
-
-```
-m = max(x)
-out_i = exp(x_i - m) / sum_j exp(x_j - m)
-```
-
-Subtracting the max does not change the math, but prevents `exp(1000)` from overflowing to inf — essential in practice.
-
-## Input data
-
-All inputs are const variables in the code — no files to parse:
+**Inputs**: const variables in the code — no files to parse:
 
 | Variable | Location | Shape | Meaning |
 | --- | --- | --- | --- |
@@ -49,14 +24,32 @@ All inputs are const variables in the code — no files to parse:
 
 Model constant: `dim = 288` (`kDim` in the code). data.h is generated from `data/*.txt` by `../tools/embed_data.py`; the values are identical.
 
-## Tasks
+**Outputs**: `main()` is already written — it calls your kernels on the 4 input sets and writes 4 output files (`out.txt`, `out_real.txt`, `out_sm.txt`, `out_big.txt`). `data/expected_*` is golden data — do not modify it.
 
-Fill in the two functions in `main.cpp` (each marked with `TODO`):
+## Subtask 1: `rmsnorm(o, x, weight)`
 
-1. **task 1 — `rmsnorm(o, x, weight)`**: apply the formula above, writing into `o`. Accumulate in `float` (including the running sum) or the golden data won't match.
-2. **task 2 — `softmax(x)`**: modify `x` **in place** (attention calls it per head on slices of a shared buffer); subtract the max before exp.
+Apply the RMSNorm formula below, writing the result into `o`. Accumulate in `float` (including the running sum) or the golden data won't match.
 
-`main()` is already written: it calls your kernels on the 4 input sets and writes 4 output files.
+Background you need — the RMSNorm math. For a vector x of length n and a learned weight w:
+
+```
+ss = (1/n) * sum(x_i^2)      # mean square
+ss = 1 / sqrt(ss + 1e-5)     # eps guards against division by zero
+out_i = w_i * ss * x_i
+```
+
+## Subtask 2: `softmax(x)`
+
+Implement softmax, modifying `x` **in place** (attention calls it per head on slices of a shared buffer), and subtract the max before exp.
+
+Background you need — the numerically stable softmax:
+
+```
+m = max(x)
+out_i = exp(x_i - m) / sum_j exp(x_j - m)
+```
+
+Subtracting the max does not change the math, but prevents `exp(1000)` from overflowing to inf — essential in practice.
 
 ## Build / run / verify
 

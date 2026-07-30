@@ -95,6 +95,7 @@ private:
         // TODO(task 1): make str_lookup fast: build a sorted index of
         // (string, id) once, or use a hash map. A linear scan per lookup
         // works but is slow inside the merge loop.
+        (void)0;
     }
 
     int str_lookup(std::string_view str) {

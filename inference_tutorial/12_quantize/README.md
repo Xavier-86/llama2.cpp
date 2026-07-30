@@ -2,33 +2,24 @@
 
 [← All modules](../README.md) · [Project README](../../README.md)
 
-> Goal: upgrade the FP32 implementation to int8 quantization and rebuild
-> `runq.cpp`. The changes are concentrated in three places: weight storage
-> format, matmul, and quantizing activations before every matmul. Everything
-> else (tokenizer / sampler / generation loop) is reused unchanged (vocab
-> parsing goes through `tut::load_vocab` in `../common/tokenizer.h`).
+## Overall task
 
-## Why quantization is faster
+Fill in the four quantization TODO groups in `main.cpp` (tasks 1a/1b, 2a/2b, 3, 4 — numbers match the code one-to-one): upgrade the completed FP32 implementation to int8 quantization and rebuild `runq.cpp`. The changes are concentrated in three places: weight storage format, matmul, and quantizing activations before every matmul. Everything else (tokenizer / sampler / generation loop) is reused unchanged — the BPE tokenizer (module 02), the sampler (module 10), the generate/chat loops (module 11), rmsnorm/softmax (module 03), and the mmap boilerplate (`MappedFile`) are all **given** in `main.cpp`; vocab parsing goes through `tut::load_vocab` in `../common/tokenizer.h`.
 
-Every decode step reads all weights once; speed ≈ bandwidth ÷ bytes. int8 cuts
-weight reads to 1/4 (plus one float scale per 32 values), so throughput goes up
-nearly 4x — that is the entire motivation of this module.
+Why quantization is faster: every decode step reads all weights once; speed ≈ bandwidth ÷ bytes. int8 cuts weight reads to 1/4 (plus one float scale per 32 values), so throughput goes up nearly 4x — that is the entire motivation of this module.
 
-## Input data at a glance
-
-Every input, without reading the code: two real files (the mmap'd quantized
-checkpoint, the vocab) plus a set of embedded const arrays.
+**Inputs**: two real files (the mmap'd quantized checkpoint, the vocab) plus a set of embedded const arrays:
 
 | Variable | Location | Shape / layout | Meaning | Where it comes from |
 | --- | --- | --- | --- | --- |
-| `checkpoint_path` | main.cpp harness (`../../stories15M-q32.bin`) | 256-byte header + mixed FP32/int8 weight region (see 12.1) | int8 quantized checkpoint, read-only mmap via `MappedFile` | exported from `stories15M.bin` by the repo-root `quantize` tool (GS=32) |
+| `checkpoint_path` | main.cpp harness (`../../stories15M-q32.bin`) | 256-byte header + mixed FP32/int8 weight region (see subtask 1) | int8 quantized checkpoint, read-only mmap via `MappedFile` | exported from `stories15M.bin` by the repo-root `quantize` tool (GS=32) |
 | `tokenizer_path` | main.cpp harness (`../../tokenizer.bin`) | [i32 max_token_length] + 32000 records of [f32 score][i32 len][len bytes of piece] | BPE vocab, parsed by `tut::load_vocab` into `tut::Vocab` | same as every FP32 module |
-| `kX` | data.h | (64,), two groups of 32 floats | test vector for the 12.2 quantize/dequantize round-trip | synthetic teaching data (mirrors data/input_x.txt) |
-| `kMatmulWQ` | data.h | (3, 8) row-major, 24 int8 | quantized weights of the 12.3 standalone matmul | synthetic teaching data (this fixture deliberately uses GS=4) |
+| `kX` | data.h | (64,), two groups of 32 floats | test vector for the subtask-2 quantize/dequantize round-trip | synthetic teaching data (mirrors data/input_x.txt) |
+| `kMatmulWQ` | data.h | (3, 8) row-major, 24 int8 | quantized weights of the subtask-3 standalone matmul | synthetic teaching data (this fixture deliberately uses GS=4) |
 | `kMatmulWS` | data.h | (3, 2) row-major, 6 floats | per-group scales of w | same |
 | `kMatmulXQ` | data.h | (8,) int8 | quantized input vector x | same |
 | `kMatmulXS` | data.h | (2,) floats | per-group scales of x | same |
-| `kTokens` | main.cpp harness | (5,) int = {1, 9038, 2501, 263, 931} | prompt token ids for the 12.4 five-position forward check | "Once upon a time" BPE-encoded (with bos) |
+| `kTokens` | main.cpp harness | (5,) int = {1, 9038, 2501, 263, 931} | prompt token ids for the subtask-4 five-position forward check | "Once upon a time" BPE-encoded (with bos) |
 
 Model constants (stories15M): dim=288, hidden_dim=768, n_layers=6, n_heads=6,
 n_kv_heads=6 (kv_dim=288), vocab_size=32000, seq_len=256, head_size=48; this
@@ -38,7 +29,30 @@ quantized checkpoint has GS=32 and shared_classifier=1.
 edit by hand; the values match the txt files exactly. After regenerating the
 data, re-run `python3 ../tools/embed_data.py ..`.
 
-## 12.1 Quantized checkpoint format (`stories15M-q32.bin`)
+**Outputs**: `main()` is already written — it writes all intermediate results needed for staged debugging:
+
+| Output | Golden data |
+| --- | --- |
+| `out_config.txt` | `expected_config.txt` |
+| `out_summary.txt` | `expected_weight_summary.txt` |
+| `out_q.txt`, `out_s.txt`, `out_deq.txt` | quantize/dequantize outputs |
+| `out_matmul.txt` | standalone int8 matmul output |
+| `out_argmax.txt`, `out_logits.txt` | five-position quantized forward |
+| `out_ids.txt`, `out_text.txt` | 64-step greedy generation |
+
+`data/expected_*` is golden data — do not modify it.
+
+## Subtask 1: load and map the quantized weights — `init_quantized_tensors()` / `Transformer::map_weights()` (task 1a/1b)
+
+- **task 1a — `init_quantized_tensors`**: carve n quantized tensors out of
+  the byte pointer, each `[size_each int8][size_each/GS float scales]`,
+  advancing the pointer after every q region and every scale region.
+- **task 1b — `Transformer::map_weights`**: map the FP32 region (rms_att /
+  rms_ffn / rms_final) and the int8 region (q_tokens, wq, wk, wv, wo, w1, w2,
+  w3, optional wcls) in the checkpoint order below, dequantize q_tokens into
+  an FP32 copy, and alias wcls to q_tokens[0] when shared.
+
+Background you need — the quantized checkpoint format (`stories15M-q32.bin`):
 
 **256-byte header**:
 
@@ -66,7 +80,7 @@ per-layer tensors are `[L0.q][L0.s][L1.q][L1.s]...`.
 At load time, dequantize q_tokens once into an FP32 copy for embedding lookup
 (avoids dequantizing every step).
 
-### Differences from the FP32 checkpoint (`stories15M.bin`, see modules 01/11)
+Differences from the FP32 checkpoint (`stories15M.bin`, see modules 01/11):
 
 | Part | FP32 version | Quantized version |
 | --- | --- | --- |
@@ -77,8 +91,7 @@ At load time, dequantize q_tokens once into an FP32 copy for embedding lookup
 | wcls | float, may share the embedding | int8, may share the embedding (shared=1 in this file) |
 | legacy freq_cis_real / freq_cis_imag tables | present (skipped at load) | absent |
 
-### How the mmap region is carved (this file is 17,101,696 bytes — check it)
-
+How the mmap region is carved (this file is 17,101,696 bytes — check it):
 `MappedFile::weights_data()` returns offset 256; `map_weights` slices spans in
 the order above — first the 3 FP32 tensors, then `init_quantized_tensors` per
 quantized tensor (int8 value region first, then the float scale region):
@@ -109,20 +122,22 @@ offset (bytes)  content                                       size
 Compared with the FP32 file's 60,816,028 bytes this is ~3.6x smaller, and every
 decode step's weight reads shrink by the same ratio.
 
-Verification: print config + GS (8 integers, `--exact` against
+Verification of this subtask: print config + GS (8 integers, `--exact` against
 `expected_config.txt`); then a weight summary in module-01 style
 (`expected_weight_summary.txt`: first the 3 FP32 tensors x 3 lines
 size/first/sum, then the 8 quantized tensors x 5 lines
-q_total_size/q_first/q_sum/s_total_size/s_first):
+q_total_size/q_first/q_sum/s_total_size/s_first). Commands are in
+"Build / run / verify" below.
 
-```bash
-python3 ../tools/compare.py out_config.txt data/expected_config.txt --exact
-python3 ../tools/compare.py out_summary.txt data/expected_weight_summary.txt
-```
+## Subtask 2: `quantize()` / `dequantize()` (task 2a/2b)
 
-## 12.2 quantize / dequantize
+- **task 2a — `dequantize`**: `x[i] = q[i] * s[i/GS]`.
+- **task 2b — `quantize`**: per group of GS values,
+  `scale = max|group| / 127`, `q[i] = std::round(x[i] / scale)`.
 
-Symmetric quantization, one scale per group of GS values:
+Both derive GS from the span-size ratio; do not hardcode 32.
+
+Background you need — symmetric quantization, one scale per group of GS values:
 
 ```
 scale = max(|group values|) / 127
@@ -134,13 +149,19 @@ dequantize: x[i] = q[i] * s[i / GS]
 Data: `kX` (data.h, 64 values = two groups of 32, GS=32) -> `expected_q.txt`
 (64 int8, `--exact`), `expected_s.txt` (2 scales), `expected_deq.txt`
 (round-trip). The kernels do not hardcode GS — they derive it from the ratio
-of the two `QuantizedTensor` span sizes (the 12.3 fixture uses GS=4).
+of the two `QuantizedTensor` span sizes (the subtask-3 fixture uses GS=4).
 
 Beware: `round` here is round-half-**away-from-zero** (`std::round`), not
 banker's rounding — watch out especially if you cross-check in Python (Python's
 `round` is banker's).
 
-## 12.3 int8 matmul
+## Subtask 3: int8 `matmul()` (task 3)
+
+**task 3 — `matmul`**: W(d,n) @ x(n). Accumulate each group into an int32,
+add `group_sum * w.s * x.s` into the float row result at the group
+boundary, and reset the integer accumulator there.
+
+Background you need — the group algorithm:
 
 ```
 per row:
@@ -156,11 +177,17 @@ Data (n=8, d=3, GS=4, all in data.h): `kMatmulWQ` ((3,8) row-major, 24 int8),
 `kMatmulWS` ((3,2) row-major, 6 scales), `kMatmulXQ` (8 int8), `kMatmulXS`
 (2 scales) -> `expected_matmul_out.txt` (3 values).
 
-## 12.4 Quantized forward + generation
+## Subtask 4: quantized `Transformer::forward()` (task 4)
 
-Take module 09's forward and, **before every matmul**, quantize the activation
-to int8 (then multiply with the int8 weights via 12.3). RMSNorm / RoPE /
-attention / SwiGLU / softmax all stay FP32, untouched:
+**task 4 — `Transformer::forward`**: port module 09's forward pass,
+quantizing the **current** activation before every matmul (the five
+insertion points below); RoPE, attention, residuals, RMSNorm, and SwiGLU
+stay FP32.
+
+Background you need — where the quantization goes. Take module 09's forward
+and, **before every matmul**, quantize the activation to int8 (then multiply
+with the int8 weights via subtask 3). RMSNorm / RoPE / attention / SwiGLU /
+softmax all stay FP32, untouched:
 
 ```
 rmsnorm xb         -> quantize xq -> Wq / Wk / Wv
@@ -173,52 +200,8 @@ final rmsnorm x    -> quantize xq -> Wcls
 Data: `kTokens` (the same 5 tokens as the earlier modules) ->
 `expected_argmax.txt` (5 integers, `--exact`) +
 `expected_logits_lastpos.txt` (full 32000-dim logits at the last position).
-
 Finally run 64 greedy steps -> `expected_greedy_ids.txt` /
-`expected_greedy_text.txt`:
-
-```bash
-python3 ../tools/compare.py out_ids.txt data/expected_greedy_ids.txt --exact
-python3 ../tools/compare.py out_text.txt data/expected_greedy_text.txt --text
-```
-
-## Tasks
-
-Everything ported unchanged from the earlier modules is **given** in
-`main.cpp`: the BPE tokenizer (module 02), the sampler (module 10), the
-generate/chat loops (module 11), rmsnorm/softmax (module 03), and the mmap
-boilerplate (`MappedFile`). Fill in the quantization-specific tasks marked
-`TODO` (numbers match the code one-to-one):
-
-1. **task 1a — `init_quantized_tensors`**: carve n quantized tensors out of
-   the byte pointer, each `[size_each int8][size_each/GS float scales]`,
-   advancing the pointer after every q region and every scale region.
-   **task 1b — `Transformer::map_weights`**: map the FP32 region (rms_att /
-   rms_ffn / rms_final) and the int8 region (q_tokens, wq, wk, wv, wo, w1, w2,
-   w3, optional wcls) in 12.1 order, dequantize q_tokens into an FP32 copy,
-   and alias wcls to q_tokens[0] when shared.
-2. **task 2a — `dequantize`**: `x[i] = q[i] * s[i/GS]`.
-   **task 2b — `quantize`**: per group of GS values,
-   `scale = max|group| / 127`, `q[i] = std::round(x[i] / scale)`. Both derive
-   GS from the span-size ratio; do not hardcode 32.
-3. **task 3 — `matmul`**: W(d,n) @ x(n). Accumulate each group into an int32,
-   add `group_sum * w.s * x.s` into the float row result at the group
-   boundary, and reset the integer accumulator there.
-4. **task 4 — `Transformer::forward`**: port module 09's forward pass,
-   quantizing the **current** activation before every matmul (the five
-   insertion points in 12.4); RoPE, attention, residuals, RMSNorm, and SwiGLU
-   stay FP32.
-
-The program writes all intermediate results needed for staged debugging:
-
-| Output | Golden data |
-| --- | --- |
-| `out_config.txt` | `expected_config.txt` |
-| `out_summary.txt` | `expected_weight_summary.txt` |
-| `out_q.txt`, `out_s.txt`, `out_deq.txt` | quantize/dequantize outputs |
-| `out_matmul.txt` | standalone int8 matmul output |
-| `out_argmax.txt`, `out_logits.txt` | five-position quantized forward |
-| `out_ids.txt`, `out_text.txt` | 64-step greedy generation |
+`expected_greedy_text.txt`.
 
 ## Build / run / verify
 
@@ -242,12 +225,12 @@ python3 ../tools/compare.py out_ids.txt data/expected_greedy_ids.txt --exact
 python3 ../tools/compare.py out_text.txt data/expected_greedy_text.txt --text
 ```
 
-## Common mistakes (debugging route)
+## Common pitfalls
 
 1. argmax all right but logits off -> normal, quantization is lossy; check the
    greedy text instead
 2. argmax wrong from the first position -> scale/round in quantize or group
-   indexing in int8 matmul is off; go back to 12.2/12.3
+   indexing in int8 matmul is off; go back to subtasks 2 and 3
 3. Early layers fine, later diverge -> check that every matmul re-quantizes the
    **current** activation (don't cross the xq/hq buffers)
 4. Different output from the FP32 version is not automatically a bug:
@@ -257,7 +240,7 @@ python3 ../tools/compare.py out_text.txt data/expected_greedy_text.txt --text
    skipped a q or s region when advancing the pointer — one tensor off, and
    everything after it is off.
 
-## Completion criteria
+## Done when
 
 All 10 compare.py commands above PASS. `solution.cpp` is the reference
 answer — peek only when stuck, then close it and write your own.

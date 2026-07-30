@@ -2,21 +2,13 @@
 
 [← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
-> 目标：把模块 08_transformer_layer 的单个 transformer 层堆叠 6 次并加上输出头，补完 `forward(token, pos) -> logits`。这是 FP32 的总装，也是第一个里程碑验收——通过后你就重建了 `run.cpp` 的 `Transformer::forward`。本模块是原"forward"模块拆分的后半；前半（单个层）在模块 08_transformer_layer。
+## 总任务
 
-## 背景
-
-模块 08 组装了一个 transformer 层并验证了它的激活。本模块回答"整个模型在一次推理中做什么"：同一个层积木重复 `n_layers` 次，最后接一个最终 RMSNorm 和分类头 matmul，输出下一个 token 的 32000 维 logits。P 个 token 的提示词需要按顺序调用 P 次（prefill 阶段）：每个位置都会用到 KV cache 中前面所有位置的 k/v，这正是 cache 存在的意义。
-
-因为单层已经验证过，本模块把它整体作为**给定代码**：6 个内核（模块 03～07）、单层组装 `transformer_layer(l, ...)`（模块 08）以及 embedding 查表都已写好在 main.cpp 里。新工作只剩堆叠循环和输出头。
-
-checkpoint 解析已由 `../common/checkpoint.h` 的 `tut::load_checkpoint` 完成（它就是模块 01 的打包答案），输出文件的写出用 `../common/io.h`。本模块代码只剩算法本身。
-
-## 数据流
+补全 `main.cpp` 中 `forward()` 内的 3 个 TODO：把模块 08_transformer_layer 的单个 transformer 层堆叠 6 次并加上输出头，完成 `forward(token, pos) -> logits`：
 
 ```
 x = embedding[token]                                  # 查表（给定）
-for l in 0..n_layers-1:                               # 6 层 (task 1)
+for l in 0..n_layers-1:                               # 6 层（子任务一）
     transformer_layer(l, ...):                        # 给定，来自模块 08
         xb = rmsnorm(x, rms_att_weight[l])            # (03)
         q = Wq[l] @ xb;  k = Wk[l] @ xb;  v = Wv[l] @ xb  # (04)
@@ -26,19 +18,19 @@ for l in 0..n_layers-1:                               # 6 层 (task 1)
         x += Wo[l] @ xb                               # wo 投影 + 残差相加
         xb = rmsnorm(x, rms_ffn_weight[l])            # (03)
         x += ffn(xb, W1[l], W2[l], W3[l])             # (07) + 残差相加
-x = rmsnorm(x, rms_final_weight)                      # (task 2)
-logits = Wcls @ x                                     # (task 3) 与 embedding table 共享
+x = rmsnorm(x, rms_final_weight)                      #（子任务二）
+logits = Wcls @ x                                     #（子任务三）与 embedding table 共享
 ```
 
-关键点：
+这是 FP32 的总装，也是第一个里程碑验收——通过后你就重建了 `run.cpp` 的 `Transformer::forward`。本模块是原"forward"模块拆分的后半；前半（单个层）在模块 08_transformer_layer。
 
-- **pre-norm + 残差**：每层内部，归一化后的输出进入分支，原始 x 保留用于残差相加；每层两个 block、两次相加，都是 `x += branch`，不是赋值。
-- **每层的权重与 cache**：每层有自己的切片——权重在 `l * 每层大小`，KV cache 行在 `l * seq_len * kv_dim`。层 l 不会碰到其他层的权重或 cache。
-- **输出头**：最后一层之后，接一个最终 RMSNorm（用自己的权重，不是按层的）和一次对 `wcls` 的 matmul 得到 logits。本模型的 `wcls` **就是** embedding table（权重共享）。
+模块 08 组装了一个 transformer 层并验证了它的激活。本模块回答"整个模型在一次推理中做什么"：同一个层积木重复 `n_layers` 次，最后接一个最终 RMSNorm 和分类头 matmul，输出下一个 token 的 32000 维 logits。P 个 token 的提示词需要按顺序调用 P 次（prefill 阶段）：每个位置都会用到 KV cache 中前面所有位置的 k/v，这正是 cache 存在的意义。
 
-## 输入数据
+因为单层已经验证过，本模块把它整体作为**给定代码**：6 个内核 `rmsnorm`、`softmax`、`matmul`、`rope`、`attention`、`ffn`（模块 03～07）、单层组装 `transformer_layer(l, pos, p, w, s)`（模块 08）以及 embedding 查表都已写好在 main.cpp 里，整个 `main()` 也是给定的。新工作只剩堆叠循环和输出头。
 
-提示词输入是 main.cpp 里的 const 数组，模型权重由 `tut::load_checkpoint("../../stories15M.bin")` 加载，返回 `tut::Checkpoint{config, weights, buffer}`，11 个权重张量都是指向 buffer 的 `std::span`，零拷贝：
+checkpoint 解析已由 `../common/checkpoint.h` 的 `tut::load_checkpoint` 完成（它就是模块 01 的打包答案），输出文件的写出用 `../common/io.h`。本模块代码只剩算法本身。
+
+**输入**：提示词输入是 main.cpp 里的 const 数组，模型权重由 `tut::load_checkpoint("../../stories15M.bin")` 加载，返回 `tut::Checkpoint{config, weights, buffer}`，11 个权重张量都是指向 buffer 的 `std::span`，零拷贝：
 
 | 变量 | 位置 | 形状 | 布局 | 含义 | 来自模型哪里 |
 | --- | --- | --- | --- | --- | --- |
@@ -56,9 +48,25 @@ logits = Wcls @ x                                     # (task 3) 与 embedding t
 
 模型常量（stories15M）：`dim=288, hidden_dim=768, n_layers=6, n_heads=6, n_kv_heads=6, vocab_size=32000, seq_len=256, head_size=48, kv_dim=288`。权重区中 `rms_final_weight` 之后还有两段遗留的 RoPE 预计算表，`tut::load_checkpoint` 已跳过，无需关心。
 
-## RunState：激活与缓存缓冲区
+**输出**：`main()` 已经写好——对 5 个提示词 token 依次调用 `forward`（pos = 0..4），收集每个位置的 logits 并求 argmax。输出文件（写在模块目录下）：
 
-`RunState` 由 config 一次性分配，跨所有位置复用（main.cpp 中已给出，无需修改）：
+| 文件 | 内容 |
+| --- | --- |
+| `out_logits.txt` | 5 个位置的完整 logits，**位置优先拼接**：pos 0 的 32000 个值、接着 pos 1 的……共 5×32000 行 |
+| `out_argmax.txt` | 每个位置 logits 的 argmax，5 个整数（贪心解码的下一 token） |
+
+`data/expected_*` 是黄金数据，不要修改。
+
+## 子任务一：堆叠各层
+
+对 `0 .. p.n_layers-1` 的每个 `l` 按顺序调用 `transformer_layer(l, pos, p, w, s)`。给定函数内部已处理好所有按层偏移，你只需写这个循环。
+
+需要的知识——给定的 `transformer_layer` 做了什么。它就是你在模块 08_transformer_layer 组装的单层，这里按层号 l 参数化：权重切片在 `l * 每层大小`，cache 切片在 `l * seq_len * kv_dim`。模块 08 的两条约定在这里依然关键：
+
+- **pre-norm + 残差**：每层内部，归一化后的输出进入分支，原始 x 保留用于残差相加；每层两个 block、两次相加，都是 `x += branch`，不是赋值。
+- **每层的权重与 cache**：每层有自己的切片——权重在 `l * 每层大小`，KV cache 行在 `l * seq_len * kv_dim`。层 l 不会碰到其他层的权重或 cache。
+
+需要的知识——`RunState`，各层所操作的激活与缓存缓冲区。它由 config 一次性分配，跨所有位置复用（main.cpp 中已给出，无需修改）：
 
 | 成员 | 尺寸 | 作用 |
 | --- | --- | --- |
@@ -71,17 +79,17 @@ logits = Wcls @ x                                     # (task 3) 与 embedding t
 | `key_cache` / `value_cache` | (6, 256, 288) | 每层每位置的 k/v 行；层 l 偏移 `l * seq_len * kv_dim`，位置 pos 偏移 `pos * kv_dim` |
 | `logits` | (32000,) | `forward` 的返回值：当前位置预测下一 token 的打分 |
 
-## 任务
+## 子任务二：最终 RMSNorm
 
-除了堆叠和输出头以外全部是 main.cpp 中的给定代码：6 个内核 `rmsnorm`、`softmax`、`matmul`、`rope`、`attention`、`ffn`（你在模块 03～07 实现的）、单层组装 `transformer_layer(l, pos, p, w, s)`（你在模块 08_transformer_layer 组装的——这里按层号 l 参数化，权重切片在 `l * 每层大小`，cache 切片在 `l * seq_len * kv_dim`）、embedding 查表，以及整个 `main()`。
+最后一层之后，用 `w.rms_final_weight` 对 `s.x` 原地做 rmsnorm。
 
-本模块的新工作是 `forward()` 中的 3 个 task：
+需要的知识——输出头的归一化权重是单独的：`rms_final_weight` 是一个单独的 (288,) 权重，不是像 `rms_att_weight` / `rms_ffn_weight` 那样的按层切片。
 
-1. **task 1 — 堆叠各层**：对 `0 .. p.n_layers-1` 的每个 `l` 按顺序调用 `transformer_layer(l, pos, p, w, s)`。给定函数内部已处理好所有按层偏移，你只需写这个循环。
-2. **task 2 — 最终 rmsnorm**：用 `w.rms_final_weight`，原地作用于 `s.x`——注意这是一个单独的 (288,) 权重，不是按层切片。
-3. **task 3 — 分类头**：`matmul(s.logits, s.x, w.wcls)`，本模型 `wcls` 就是共享的 embedding table。
+## 子任务三：分类头
 
-`main()` 已写好：对 5 个提示词 token 依次调用 `forward`（pos = 0..4），收集每个位置的 logits 并求 argmax。
+再做一次 matmul 得到 logits：`matmul(s.logits, s.x, w.wcls)`。
+
+需要的知识——权重共享：本模型的 `wcls` **就是** embedding table（同一 span），分类头复用 `w.token_embedding_table`。
 
 ## 构建 / 运行 / 验证
 
@@ -91,13 +99,6 @@ c++ -O2 -std=c++20 -o main main.cpp
 python3 ../tools/compare.py out_argmax.txt data/expected_argmax.txt --exact
 python3 ../tools/compare.py out_logits.txt data/expected_logits.txt
 ```
-
-输出文件（写在模块目录下）：
-
-| 文件 | 内容 |
-| --- | --- |
-| `out_logits.txt` | 5 个位置的完整 logits，**位置优先拼接**：pos 0 的 32000 个值、接着 pos 1 的……共 5×32000 行 |
-| `out_argmax.txt` | 每个位置 logits 的 argmax，5 个整数（贪心解码的下一 token） |
 
 ## 常见错误
 

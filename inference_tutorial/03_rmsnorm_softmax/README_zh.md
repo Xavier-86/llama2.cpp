@@ -2,11 +2,9 @@
 
 [← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
-> 目标：实现 Transformer 中随处可见的两个归一化函数，每个函数都不到 10 行。
+## 总任务
 
-## 背景
-
-一次前向传播中，这两个函数被反复调用：
+补全 `main.cpp` 中的两个 TODO——Transformer 中随处可见的两个归一化内核：`rmsnorm(o, x, weight)` 和 `softmax(x)`，每个函数都不到 10 行。一次前向传播中，这两个函数被反复调用：
 
 ```
 token embedding → [ RMSNorm → attention(内含 softmax) → RMSNorm → FFN ] × 6 层 → RMSNorm → logits → softmax(采样时)
@@ -14,30 +12,7 @@ token embedding → [ RMSNorm → attention(内含 softmax) → RMSNorm → FFN 
 
 RMSNorm 把向量幅度归一化以保证数值稳定；softmax 把任意实数向量变成概率分布（注意力权重、采样概率）。
 
-## 数学原理
-
-### RMSNorm
-
-对于长度为 n 的向量 x 和学习得到的权重 w：
-
-```
-ss = (1/n) * sum(x_i^2)      # 均方
-ss = 1 / sqrt(ss + 1e-5)     # eps 防止除零
-out_i = w_i * ss * x_i
-```
-
-### Softmax（数值稳定版）
-
-```
-m = max(x)
-out_i = exp(x_i - m) / sum_j exp(x_j - m)
-```
-
-减去最大值不改变数学结果，但能防止 `exp(1000)` 溢出为 inf——这是数值计算中不可或缺的技巧。
-
-## 输入数据
-
-所有输入都是代码里的 const 变量，无需读任何文件：
+**输入**：代码里的 const 变量，无需读任何文件：
 
 | 变量 | 位置 | 形状 | 含义 |
 | --- | --- | --- | --- |
@@ -49,14 +24,32 @@ out_i = exp(x_i - m) / sum_j exp(x_j - m)
 
 模型常量：`dim = 288`（代码中为 `kDim`）。data.h 由 `../tools/embed_data.py` 从 `data/*.txt` 生成，值与 txt 完全一致。
 
-## 任务
+**输出**：`main()` 已经写好——它用 4 组输入调用你的内核并写出 4 个输出文件（`out.txt`、`out_real.txt`、`out_sm.txt`、`out_big.txt`）。`data/expected_*` 是黄金数据，不要修改。
 
-补全 `main.cpp` 中的两个函数（各有 `TODO` 标注）：
+## 子任务一：`rmsnorm(o, x, weight)`
 
-1. **task 1 — `rmsnorm(o, x, weight)`**：按上面公式计算，结果写入 `o`。累加和也用 `float`，否则与标准数据对不上。
-2. **task 2 — `softmax(x)`**：**原地**修改 `x`（注意力会对共享缓冲区中每个 head 的切片调用它）；先减最大值再 exp。
+按下面的 RMSNorm 公式计算，结果写入 `o`。累加和也用 `float`，否则与标准数据对不上。
 
-`main()` 已经写好：它用 4 组输入调用你的内核并写出 4 个输出文件。
+需要的知识——RMSNorm 的数学原理。对于长度为 n 的向量 x 和学习得到的权重 w：
+
+```
+ss = (1/n) * sum(x_i^2)      # 均方
+ss = 1 / sqrt(ss + 1e-5)     # eps 防止除零
+out_i = w_i * ss * x_i
+```
+
+## 子任务二：`softmax(x)`
+
+实现 softmax，**原地**修改 `x`（注意力会对共享缓冲区中每个 head 的切片调用它）；先减最大值再 exp。
+
+需要的知识——数值稳定版 softmax：
+
+```
+m = max(x)
+out_i = exp(x_i - m) / sum_j exp(x_j - m)
+```
+
+减去最大值不改变数学结果，但能防止 `exp(1000)` 溢出为 inf——这是数值计算中不可或缺的技巧。
 
 ## 构建 / 运行 / 验证
 

@@ -2,9 +2,9 @@
 
 [← 所有模块](../README_zh.md) · [项目首页](../../README_zh.md)
 
-> 目标：向 Q 和 K 注入位置信息。注意力本身无法判断词序，正是这一步让它感知位置。
+## 总任务
 
-## 背景
+补全 `main.cpp` 中 `rope(q, k, pos)` 的四个 TODO：对**一个位置**的 q/k 切片原地旋转。
 
 模块 04 算出的 q / k 投影只是"内容"向量，不含任何位置信息——把句子打乱，注意力分数完全不变。RoPE（Rotary Position Embedding）在注意力之前对 q 和 k 做一次**与位置相关的旋转**，使得两个 token 的 q·k 点积只取决于它们的**相对距离**，这正是注意力需要的位置信号。
 
@@ -12,9 +12,28 @@
 embedding → RMSNorm → q/k/v 投影(模块 04) → 【RoPE(本模块)】 → k 写入 key cache → 注意力(模块 06)
 ```
 
-## 数学原理
+**输入**：data.h 里的 const 数组，无需读任何文件。数据来自真实前向传播：stories15M 第 0 层，提示词 `"Once upon a time"` → token id `[1, 9038, 2501, 263, 931]`，共 P=5 个位置。
 
-把每个 head 内的相邻两维 `(v0, v1)` 视作一个二维向量（等价于一个复数），按角度 `pos * freq` 旋转：
+| 变量 | 位置 | 形状 | 布局 | 含义 | 来自模型哪里 |
+| --- | --- | --- | --- | --- | --- |
+| `kQ` | data.h | (P, dim) = (5, 288) | pos-major | RoPE 之前的 q 投影 | 第 0 层 `x @ wq`，即 5 个提示词位置的 query |
+| `kK` | data.h | (P, kv_dim) = (5, 288) | pos-major | RoPE 之前的 k 投影 | 第 0 层 `x @ wk`，即 5 个提示词位置的 key |
+
+模型常量：`dim = 288`、`kv_dim = 288`、`n_heads = n_kv_heads = 6`、`head_size = 48`、`P = 5`（代码中为 `kDim`、`kKvDim`、`kHeadSize`、`kPositions`）。data.h 由 `../tools/embed_data.py` 从 `data/*.txt` 生成，值与 txt 完全一致，请勿手改。
+
+**输出**：`main()` 已经写好——从 data.h 拷贝输入、对 pos = 0..4 逐位置调用 `rope`、写出 `out_q.txt` / `out_k.txt`。`data/expected_*` 是黄金数据，不要修改。
+
+## 子任务一：以步长 2 遍历相邻维度对
+
+以步长 2 遍历相邻维度对 `i = 0, 2, 4, ... dim-2`。
+
+需要的知识——内存布局。两个数组都是 **pos-major 拼接**——位置 pos 占据 `[pos*dim, (pos+1)*dim)`；每个位置内部是 **head-major**——head h 占据 `[h*head_size, (h+1)*head_size)`（head_size = 48，6 个 head 共 288 维）。因此下标 i 所属 head 为 `i / head_size`，head 内维度对索引为 `i % head_size`。
+
+## 子任务二：计算 `head_dim`、`freq` 与 `angle`
+
+对每个维度对，计算 `head_dim = i % head_size`、`freq = 1 / 10000^(head_dim / head_size)`、`angle = pos * freq`，并用 float 版本的 `std::cos` / `std::sin`。
+
+需要的知识——数学原理。把每个 head 内的相邻两维 `(v0, v1)` 视作一个二维向量（等价于一个复数），按角度 `pos * freq` 旋转：
 
 ```
 for i = 0, 2, 4, ... dim-2:
@@ -24,35 +43,19 @@ for i = 0, 2, 4, ... dim-2:
     (v0', v1') = (v0*cos(angle) - v1*sin(angle),  v0*sin(angle) + v1*cos(angle))
 ```
 
-关键约定：
+**频率按 head 内索引计算**，不是全局索引：每个 head 的前 24 个维度对（head_size=48）各用一套从 1 到 ~1e-4 的频率，低频转得慢（编码长距离），高频转得快（编码局部）。
 
-- **频率按 head 内索引计算**，不是全局索引：每个 head 的前 24 个维度对（head_size=48）各用一套从 1 到 ~1e-4 的频率，低频转得慢（编码长距离），高频转得快（编码局部）。
-- **q 全部 dim 个值都旋转，k 只旋转前 kv_dim 个值**（代码中第二个旋转包在 `if (i < kv_dim)` 里）。原因：q 有 n_heads × head_size = dim 个值，而 k 只有 n_kv_heads × head_size = kv_dim 个值；在 GQA 模型中 n_kv_heads < n_heads，kv_dim < dim，越过 kv_dim 就越界了。本模型 kv_dim == dim == 288，所以 k 实际上也全部旋转，但边界判断这个约定必须保留。
-- **原地旋转**：旋转后的 k 就地写回，随后原样存入 key cache——即 **cache 里保存的是旋转后的 k**。
+## 子任务三：原地旋转 q 中的该维度对
 
-## 输入数据
+原地旋转 q 中的该维度对：`(v0', v1') = (v0*cos - v1*sin, v0*sin + v1*cos)`。
 
-所有输入都是 data.h 里的 const 数组，无需读任何文件。数据来自真实前向传播：stories15M 第 0 层，提示词 `"Once upon a time"` → token id `[1, 9038, 2501, 263, 931]`，共 P=5 个位置。
+需要的知识——**原地旋转**：旋转后的 k 就地写回，随后原样存入 key cache——即 **cache 里保存的是旋转后的 k**。
 
-| 变量 | 位置 | 形状 | 布局 | 含义 | 来自模型哪里 |
-| --- | --- | --- | --- | --- | --- |
-| `kQ` | data.h | (P, dim) = (5, 288) | pos-major | RoPE 之前的 q 投影 | 第 0 层 `x @ wq`，即 5 个提示词位置的 query |
-| `kK` | data.h | (P, kv_dim) = (5, 288) | pos-major | RoPE 之前的 k 投影 | 第 0 层 `x @ wk`，即 5 个提示词位置的 key |
+## 子任务四：在 `i < kv_dim` 约束下旋转 k 中的同一维度对
 
-**布局细节**：两个数组都是 **pos-major 拼接**——位置 pos 占据 `[pos*dim, (pos+1)*dim)`；每个位置内部是 **head-major**——head h 占据 `[h*head_size, (h+1)*head_size)`（head_size = 48，6 个 head 共 288 维）。因此下标 i 所属 head 为 `i / head_size`，head 内维度对索引为 `i % head_size`。
+仅当 `i < kv_dim` 时，对 k 中的同一维度对做同样旋转。
 
-模型常量：`dim = 288`、`kv_dim = 288`、`n_heads = n_kv_heads = 6`、`head_size = 48`、`P = 5`（代码中为 `kDim`、`kKvDim`、`kHeadSize`、`kPositions`）。data.h 由 `../tools/embed_data.py` 从 `data/*.txt` 生成，值与 txt 完全一致，请勿手改。
-
-## 任务
-
-补全 `main.cpp` 中的 `rope(q, k, pos)`（有 `TODO` 标注），对**一个位置**的 q/k 切片原地旋转：
-
-1. **task 1**：以步长 2 遍历相邻维度对 `i = 0, 2, 4, ... dim-2`。
-2. **task 2**：计算 `head_dim = i % head_size`、`freq = 1 / 10000^(head_dim / head_size)`、`angle = pos * freq`，并用 float 版本的 `std::cos` / `std::sin`。
-3. **task 3**：原地旋转 q 中的该维度对：`(v0', v1') = (v0*cos - v1*sin, v0*sin + v1*cos)`。
-4. **task 4**：仅当 `i < kv_dim` 时，对 k 中的同一维度对做同样旋转。
-
-`main()` 已经写好：从 data.h 拷贝输入、对 pos = 0..4 逐位置调用 `rope`、写出 `out_q.txt` / `out_k.txt`。
+需要的知识——**q 全部 dim 个值都旋转，k 只旋转前 kv_dim 个值**（代码中第二个旋转包在 `if (i < kv_dim)` 里）。原因：q 有 n_heads × head_size = dim 个值，而 k 只有 n_kv_heads × head_size = kv_dim 个值；在 GQA 模型中 n_kv_heads < n_heads，kv_dim < dim，越过 kv_dim 就越界了。本模型 kv_dim == dim == 288，所以 k 实际上也全部旋转，但边界判断这个约定必须保留。
 
 ## 构建 / 运行 / 验证
 
