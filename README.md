@@ -7,9 +7,10 @@
 
 ```
 ├── cpu/                  CPU inference: run.cpp (FP32), runq.cpp (int8), quantize.cpp (converter)
-├── gpu/                  GPU inference on cuBLAS (planned, not implemented yet)
+├── gpu/                  GPU inference: rungpu.cu (FP32), runqgpu.cu (int8) — cuBLAS + hand-written kernels
 ├── models/               weights & tokenizer: stories15M/42M (.bin, FP32), stories*-q32.bin (int8), tokenizer.bin
-├── inference_tutorial/   step-by-step tutorial: rebuild the whole pipeline in 12 verifiable modules
+├── cpu_tutorial/         CPU step-by-step tutorial: rebuild the whole pipeline in 12 verifiable modules
+├── gpu_tutorial/         GPU step-by-step tutorial: port the forward pass to CUDA in 8 modules
 └── docs/                 detailed docs: usage, quantization, debugging
 ```
 
@@ -44,4 +45,5 @@ When generation finishes, stderr prints `achieved tok/s`, which you can use to c
 - [docs/usage.md](docs/usage.md) — all CLI options, generate/chat modes, examples
 - [docs/quantization.md](docs/quantization.md) — int8 format, group size, speed/size trade-offs
 - [docs/debugging.md](docs/debugging.md) — lldb (macOS) / gdb (Linux) / VSCode debugging guide
-- [inference_tutorial/](inference_tutorial/README.md) — hands-on tutorial: re-implement FP32 and int8 inference module by module with golden test data
+- [cpu_tutorial/](cpu_tutorial/README.md) — hands-on tutorial: re-implement FP32 and int8 inference module by module with golden test data
+- [gpu_tutorial/](gpu_tutorial/README_zh.md) — port the forward pass to GPU (cuBLAS + hand-written CUDA kernels) in 8 modules

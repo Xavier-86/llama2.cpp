@@ -2,6 +2,8 @@
 run
 runcpp*
 runqcpp*
+rungpu*
+runqgpu*
 quantize
 
 # debug symbols

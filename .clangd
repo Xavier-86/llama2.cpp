@@ -1,0 +1,35 @@
+CompileFlags:
+  Compiler: clang++
+  CompilationDatabase: None
+  Add:
+    - -std=c++20
+    - --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12
+    - --cuda-path=/usr/local/cuda-12.8
+    - -I/usr/local/cuda-12.8/include
+    - --cuda-gpu-arch=sm_89
+    - -Wno-unknown-cuda-version
+    - -Wno-pragma-system-header-outside-header
+  Remove:
+    - -G
+    - "-Xcompiler*"
+    - "-Xcudafe*"
+    - "-gencode*"
+    - "--generate-code*"
+    - "-ccbin*"
+
+---
+
+If:
+  PathMatch: '.*\.(cu|cuh)$'
+CompileFlags:
+  Add:
+    - -x
+    - cuda
+Diagnostics:
+  Suppress:
+    - variadic_device_fn
+    - attributes_not_allowed
+    - template_param_shadow
+    - deduction_guide_target_attr
+    - shared_var_init
+    - ref_bad_target

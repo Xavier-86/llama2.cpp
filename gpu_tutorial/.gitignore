@@ -1,0 +1,9 @@
+# Module programs write their comparison results beside the source files.
+**/out*.txt
+
+# Local executables built from main.cu / solution.cu.
+**/main
+**/solution
+
+# Golden-data generator executable (the .cpp source remains tracked).
+/tools/gen_data

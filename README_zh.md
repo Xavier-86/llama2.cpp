@@ -7,9 +7,10 @@
 
 ```
 ├── cpu/                  CPU 推理：run.cpp（FP32）、runq.cpp（int8）、quantize.cpp（转换工具）
-├── gpu/                  基于 cuBLAS 的 GPU 推理（规划中，尚未实现）
+├── gpu/                  GPU 推理：rungpu.cu（FP32）、runqgpu.cu（int8）——cuBLAS + 手写 kernel
 ├── models/               权重与分词器：stories15M/42M（.bin，FP32）、stories*-q32.bin（int8）、tokenizer.bin
-├── inference_tutorial/   分步教程：用 12 个可验证模块亲手重建完整推理流程
+├── cpu_tutorial/         CPU 分步教程：用 12 个可验证模块亲手重建完整推理流程
+├── gpu_tutorial/         GPU 分步教程：用 8 个模块把 forward 移植到 CUDA
 └── docs/                 详细文档：用法、量化、调试
 ```
 
@@ -44,4 +45,5 @@ c++ -O3 -std=c++17 -o cpu/quantize cpu/quantize.cpp # 量化转换工具
 - [docs/usage_zh.md](docs/usage_zh.md) — 全部命令行参数、generate/chat 模式、示例
 - [docs/quantization_zh.md](docs/quantization_zh.md) — int8 格式、group size、速度与体积权衡
 - [docs/debugging_zh.md](docs/debugging_zh.md) — lldb（macOS）/ gdb（Linux）/ VSCode 调试指南
-- [inference_tutorial/](inference_tutorial/README_zh.md) — 动手教程：借助 golden 测试数据逐模块重实现 FP32 与 int8 推理
+- [cpu_tutorial/](cpu_tutorial/README_zh.md) — 动手教程：借助 golden 测试数据逐模块重实现 FP32 与 int8 推理
+- [gpu_tutorial/](gpu_tutorial/README_zh.md) — GPU 移植教程：cuBLAS + 手写 CUDA kernel，8 个模块把 forward 搬上显卡

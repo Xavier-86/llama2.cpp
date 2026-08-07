@@ -25,5 +25,13 @@
                 }
             }
         ]
-    }
+    },
+    "nsight.cuda.languageSupport.provider": "clangd",
+    "nsight.cuda.languageSupport.autoConfigure": false,
+    "clangd.path": "/home/xmy/.local/bin/clangd",
+    "clangd.arguments": [
+        "--background-index"
+    ],
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "extensions.supportNodeGlobalNavigator": true
 }

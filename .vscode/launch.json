@@ -90,6 +90,58 @@
             "MIMode": "gdb",
             "miDebuggerPath": "/usr/bin/gdb",
             "preLaunchTask": "Linux: build runqcpp_dbg"
+        },
+        {
+            "name": "cuda: Debug current file",
+            "type": "cuda-gdb",
+            "request": "launch",
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "args": [
+                "${workspaceFolder}/models/stories15M.bin",
+                "-z", "${workspaceFolder}/models/tokenizer.bin",
+                "-t", "0.0",
+                "-n", "64",
+                "-s", "42",
+                "-i", "Once upon a time"
+            ],
+            "cwd": "${fileDirname}",
+            "stopAtEntry": true,
+            "debuggerPath": "/usr/local/cuda-12.8/bin/cuda-gdb",
+            "preLaunchTask": "cuda: nvcc build active file"
+        },
+        {
+            "name": "cuda: Debug rungpu (FP32)",
+            "type": "cuda-gdb",
+            "request": "launch",
+            "program": "${workspaceFolder}/gpu/rungpu_dbg",
+            "args": [
+                "models/stories15M.bin",
+                "-t", "0.0",
+                "-n", "64",
+                "-s", "42",
+                "-i", "Once upon a time"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "debuggerPath": "/usr/local/cuda-12.8/bin/cuda-gdb",
+            "preLaunchTask": "cuda: build rungpu_dbg"
+        },
+        {
+            "name": "cuda: Debug runqgpu (int8)",
+            "type": "cuda-gdb",
+            "request": "launch",
+            "program": "${workspaceFolder}/gpu/runqgpu_dbg",
+            "args": [
+                "models/stories15M-q32.bin",
+                "-t", "0.0",
+                "-n", "64",
+                "-s", "42",
+                "-i", "Once upon a time"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "debuggerPath": "/usr/local/cuda-12.8/bin/cuda-gdb",
+            "preLaunchTask": "cuda: build runqgpu_dbg"
         }
     ]
 }
