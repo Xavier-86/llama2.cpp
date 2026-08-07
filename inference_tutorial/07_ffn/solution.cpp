@@ -39,7 +39,7 @@ void matmul(std::span<float> xout, std::span<const float> x, std::span<const flo
 
 int main() {
     // Load the checkpoint once; every weight is a span view into its buffer.
-    const tut::Checkpoint ckpt = tut::load_checkpoint("../../stories15M.bin");
+    const tut::Checkpoint ckpt = tut::load_checkpoint("../../models/stories15M.bin");
     const size_t dim = ckpt.config.dim;
     const size_t hidden = ckpt.config.hidden_dim;
 

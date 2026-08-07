@@ -483,8 +483,8 @@ Generation generate(Transformer& transformer, Tokenizer& tokenizer, Sampler& sam
 
 int main() {
     try {
-        const std::string checkpoint_path = "../../stories15M.bin";
-        const std::string tokenizer_path = "../../tokenizer.bin";
+        const std::string checkpoint_path = "../../models/stories15M.bin";
+        const std::string tokenizer_path = "../../models/tokenizer.bin";
         const std::string prompt = "Once upon a time"; // -> [1, 9038, 2501, 263, 931]
         const int steps = 64;
 

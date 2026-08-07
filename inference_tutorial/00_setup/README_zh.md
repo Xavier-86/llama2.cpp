@@ -23,11 +23,11 @@ forward(token, pos) -> 词表上 32000 个 logits -> 采样器 -> 下一个 toke
 
 | 文件 | 使用者 | 含义 |
 | --- | --- | --- |
-| `../../stories15M.bin` | `../../run.cpp` | FP32 参考模型 |
-| `../../stories15M-q32.bin` | `../../runq.cpp` | int8 量化模型，group size 32 |
-| `../../tokenizer.bin` | 两者 | 词表 / 分词器表 |
+| `../../models/stories15M.bin` | `../../cpu/run.cpp` | FP32 参考模型 |
+| `../../models/stories15M-q32.bin` | `../../cpu/runq.cpp` | int8 量化模型，group size 32 |
+| `../../models/tokenizer.bin` | 两者 | 词表 / 分词器表 |
 
-**输出**：`./runcpp ... -t 0.0 -n 64 -s 42 -i "Once upon a time"` 打印的故事必须与 `data/expected_greedy.txt` 完全一致（temperature=0 表示贪心解码，因此结果是确定的）。`data/expected_greedy.txt` 是黄金数据，不要修改。健全性检查的 `main()` 会把上述三个文件的大小逐行打印出来。
+**输出**：`./cpu/runcpp ... -t 0.0 -n 64 -s 42 -i "Once upon a time"` 打印的故事必须与 `data/expected_greedy.txt` 完全一致（temperature=0 表示贪心解码，因此结果是确定的）。`data/expected_greedy.txt` 是黄金数据，不要修改。健全性检查的 `main()` 会把上述三个文件的大小逐行打印出来。
 
 ## 子任务一：构建参考实现并跑出基线
 
@@ -35,16 +35,16 @@ forward(token, pos) -> 词表上 32000 个 logits -> 采样器 -> 下一个 toke
 
 ```bash
 cd ../..   # 仓库根目录（llama2_cpp）
-c++ -O3 -std=c++20 -o runcpp run.cpp
-c++ -O3 -std=c++20 -o runqcpp runq.cpp
-./runcpp stories15M.bin -t 0.0 -n 64 -s 42 -i "Once upon a time"
-./runqcpp stories15M-q32.bin -t 0.0 -n 64 -s 42 -i "Once upon a time"
+c++ -O3 -std=c++20 -o cpu/runcpp cpu/run.cpp
+c++ -O3 -std=c++20 -o cpu/runqcpp cpu/runq.cpp
+./cpu/runcpp models/stories15M.bin -t 0.0 -n 64 -s 42 -i "Once upon a time"
+./cpu/runqcpp models/stories15M-q32.bin -t 0.0 -n 64 -s 42 -i "Once upon a time"
 ```
 
 然后对黄金文件验证第一条命令的输出（在仓库根目录下执行）：
 
 ```bash
-diff <(./runcpp stories15M.bin -t 0.0 -n 64 -s 42 -i "Once upon a time" 2>/dev/null) \
+diff <(./cpu/runcpp models/stories15M.bin -t 0.0 -n 64 -s 42 -i "Once upon a time" 2>/dev/null) \
      inference_tutorial/00_setup/data/expected_greedy.txt
 ```
 

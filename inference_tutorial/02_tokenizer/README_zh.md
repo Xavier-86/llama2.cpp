@@ -11,9 +11,9 @@
 [1, 9038, 2501, 263, 931]     --decode-->  "Once upon a time"
 ```
 
-模型看到的不是文字，而是整数序列；tokenizer 负责文字和整数序列之间的双向转换。本模块实现的 BPE（byte-pair encoding）算法与 `../../run.cpp` 中的 `Tokenizer` 完全一致：先把文本拆成单字符 token，再按词表分数贪心合并相邻对。
+模型看到的不是文字，而是整数序列；tokenizer 负责文字和整数序列之间的双向转换。本模块实现的 BPE（byte-pair encoding）算法与 `../../cpu/run.cpp` 中的 `Tokenizer` 完全一致：先把文本拆成单字符 token，再按词表分数贪心合并相邻对。
 
-这是独立模块：不需要模型权重，只需词表文件 `../../tokenizer.bin`。词表解析已由 `tut::load_vocab(path, vocab_size)`（`../common/tokenizer.h`）完成，返回 `tut::Vocab{pieces, scores, max_token_length}`：`pieces[id]` 是 token 的文本片段，`scores[id]` 是 BPE 合并分数。
+这是独立模块：不需要模型权重，只需词表文件 `../../models/tokenizer.bin`。词表解析已由 `tut::load_vocab(path, vocab_size)`（`../common/tokenizer.h`）完成，返回 `tut::Vocab{pieces, scores, max_token_length}`：`pieces[id]` 是 token 的文本片段，`scores[id]` 是 BPE 合并分数。
 
 **输入**：main.cpp 里的 const 变量（词表除外），无需读任何数据文件：
 

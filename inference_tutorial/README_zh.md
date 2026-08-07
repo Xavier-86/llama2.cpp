@@ -41,7 +41,7 @@ python3 ../tools/compare.py out.txt data/expected_xxx.txt --text
 
 构建命令：`c++ -O2 -std=c++20 -o main main.cpp`
 
-在自己的版本通过测试前，尽量不要阅读 `solution.cpp`（或参考实现 `../run.cpp` / `../runq.cpp`）。卡住时可以查看，找到思路后再关掉。
+在自己的版本通过测试前，尽量不要阅读 `solution.cpp`（或参考实现 `../cpu/run.cpp` / `../cpu/runq.cpp`）。卡住时可以查看，找到思路后再关掉。
 
 ## 模块路线图
 
@@ -65,7 +65,7 @@ python3 ../tools/compare.py out.txt data/expected_xxx.txt --text
 
 ## 测试设置与数据约定
 
-- 模型：`../../stories15M.bin`（FP32）和 `../../stories15M-q32.bin`（int8，GS=32）；分词器：`../../tokenizer.bin`
+- 模型：`../../models/stories15M.bin`（FP32）和 `../../models/stories15M-q32.bin`（int8，GS=32）；分词器：`../../models/tokenizer.bin`
 - 模型配置：dim=288、hidden_dim=768、n_layers=6、n_heads=6、n_kv_heads=6、vocab_size=32000、seq_len=256（head_size=48、kv_dim=288）
 - 参考提示词：`"Once upon a time"` -> token id `[1, 9038, 2501, 263, 931]`，共 P=5 个位置
 - 保存各位置数值的文件按**位置优先**拼接：先放 pos 0 的 `dim` 个值，再放 pos 1，以此类推
@@ -85,8 +85,8 @@ python3 ../tools/compare.py out.txt data/expected_xxx.txt --text
 ```bash
 c++ -O2 -std=c++20 -o inference_tutorial/tools/dump_fp32 inference_tutorial/tools/dump_fp32.cpp
 c++ -O2 -std=c++20 -o inference_tutorial/tools/dump_int8 inference_tutorial/tools/dump_int8.cpp
-./inference_tutorial/tools/dump_fp32 inference_tutorial stories15M.bin tokenizer.bin
-./inference_tutorial/tools/dump_int8 inference_tutorial stories15M-q32.bin tokenizer.bin
+./inference_tutorial/tools/dump_fp32 inference_tutorial models/stories15M.bin models/tokenizer.bin
+./inference_tutorial/tools/dump_int8 inference_tutorial models/stories15M-q32.bin models/tokenizer.bin
 python3 inference_tutorial/tools/embed_data.py inference_tutorial
 ```
 

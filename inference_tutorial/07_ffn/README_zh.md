@@ -28,7 +28,7 @@ out = W2 @ h          # (dim, hidden_dim) @ (hidden_dim,) -> (dim,)，降维投�
 | 变量 | 位置 | 形状 | 布局 | 含义 | 来自模型哪里 |
 | --- | --- | --- | --- | --- | --- |
 | `kX` | data.h | (288,) | 一维 float 数组 | FFN 输入：最后一个 prompt 位置经 `rms_ffn_weight` 归一化后的 x | 第 0 层 FFN 入口（`data/input_x.txt` 的镜像） |
-| `ckpt.weights.w1` | `tut::load_checkpoint("../../stories15M.bin")` | (6, 768, 288) = (n_layers, hidden_dim, dim) | 行优先，每层 hidden_dim 行 × dim 列 | 升维投影权重（门控分支） | checkpoint 权重区 `w1` 张量，层 l 切片起点 = `l * hidden_dim * dim` |
+| `ckpt.weights.w1` | `tut::load_checkpoint("../../models/stories15M.bin")` | (6, 768, 288) = (n_layers, hidden_dim, dim) | 行优先，每层 hidden_dim 行 × dim 列 | 升维投影权重（门控分支） | checkpoint 权重区 `w1` 张量，层 l 切片起点 = `l * hidden_dim * dim` |
 | `ckpt.weights.w3` | 同上 | (6, 768, 288) | 行优先，同 w1 | 升维投影权重（线性分支） | checkpoint 权重区 `w3` 张量，层 l 切片起点 = `l * hidden_dim * dim` |
 | `ckpt.weights.w2` | 同上 | (6, 288, 768) = (n_layers, dim, hidden_dim) | 行优先，每层 dim 行 × hidden_dim 列 | 降维投影权重 | checkpoint 权重区 `w2` 张量，层 l 切片起点 = `l * dim * hidden_dim` |
 

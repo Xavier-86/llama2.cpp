@@ -2,9 +2,9 @@
 //
 // Open the three binary files that every later module depends on and print
 // their sizes in bytes, one per line:
-//   ../../stories15M.bin      FP32 reference model (used by run.cpp)
-//   ../../stories15M-q32.bin  int8-quantized model, group size 32 (used by runq.cpp)
-//   ../../tokenizer.bin       vocabulary / tokenizer table
+//   ../../models/stories15M.bin      FP32 reference model (used by run.cpp)
+//   ../../models/stories15M-q32.bin  int8-quantized model, group size 32 (used by runq.cpp)
+//   ../../models/tokenizer.bin       vocabulary / tokenizer table
 //
 // Build and run from this folder:
 //   c++ -O2 -std=c++20 -o solution solution.cpp
@@ -16,9 +16,9 @@
 namespace {
 
 // Paths are relative to this module folder (inference_tutorial/00_setup).
-const char* kModelFp32 = "../../stories15M.bin";
-const char* kModelInt8 = "../../stories15M-q32.bin";
-const char* kTokenizer = "../../tokenizer.bin";
+const char* kModelFp32 = "../../models/stories15M.bin";
+const char* kModelInt8 = "../../models/stories15M-q32.bin";
+const char* kTokenizer = "../../models/tokenizer.bin";
 
 // Open `path` in binary mode and print its size in bytes on its own line.
 // Return false (after reporting to stderr) if the file cannot be opened.

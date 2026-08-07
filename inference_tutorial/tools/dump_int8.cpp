@@ -7,7 +7,7 @@
 // e.g.:  ./dump_int8 inference_tutorial stories15M-q32.bin tokenizer.bin
 
 #define main llama2_reference_cli_main
-#include "../../runq.cpp"
+#include "../../cpu/runq.cpp"
 #undef main
 
 #include "dump_common.h"

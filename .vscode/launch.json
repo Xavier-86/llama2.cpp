@@ -2,43 +2,94 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "C++ Debug: current file",
+            "name": "Mac: C++ Debug current file",
             "type": "lldb",
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}",
             "args": [],
             "cwd": "${fileDirname}",
-            "preLaunchTask": "C/C++: clang++ build active file"
+            "preLaunchTask": "Mac: clang++ build active file"
         },
         {
-            "name": "Debug run.cpp (FP32)",
+            "name": "Mac: Debug run.cpp (FP32)",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/runcpp_dbg",
+            "program": "${workspaceFolder}/cpu/runcpp_dbg",
             "args": [
-                "stories15M.bin",
+                "models/stories15M.bin",
                 "-t", "0.0",
                 "-n", "64",
                 "-s", "42",
                 "-i", "Once upon a time"
             ],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "build runcpp_dbg"
+            "preLaunchTask": "Mac: build runcpp_dbg"
         },
         {
-            "name": "Debug runq.cpp (int8)",
+            "name": "Mac: Debug runq.cpp (int8)",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/runqcpp_dbg",
+            "program": "${workspaceFolder}/cpu/runqcpp_dbg",
             "args": [
-                "stories15M-q32.bin",
+                "models/stories15M-q32.bin",
                 "-t", "0.0",
                 "-n", "64",
                 "-s", "42",
                 "-i", "Once upon a time"
             ],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "build runqcpp_dbg"
+            "preLaunchTask": "Mac: build runqcpp_dbg"
+        },
+        {
+            "name": "Linux: C++ Debug current file",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "args": [],
+            "cwd": "${fileDirname}",
+            "stopAtEntry": false,
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "Linux: g++-12 build active file"
+        },
+        {
+            "name": "Linux: Debug run.cpp (FP32)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/cpu/runcpp_dbg",
+            "args": [
+                "models/stories15M.bin",
+                "-t", "0.0",
+                "-n", "64",
+                "-s", "42",
+                "-i", "Once upon a time"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "Linux: build runcpp_dbg"
+        },
+        {
+            "name": "Linux: Debug runq.cpp (int8)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/cpu/runqcpp_dbg",
+            "args": [
+                "models/stories15M-q32.bin",
+                "-t", "0.0",
+                "-n", "64",
+                "-s", "42",
+                "-i", "Once upon a time"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "Linux: build runqcpp_dbg"
         }
     ]
 }

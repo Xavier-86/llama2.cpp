@@ -283,7 +283,7 @@ std::span<const float> forward(int token, int pos, const tut::Config& p,
 int main() {
     try {
         // the checkpoint owns the weight buffer; all weight spans point into it
-        const tut::Checkpoint ckpt = tut::load_checkpoint("../../stories15M.bin");
+        const tut::Checkpoint ckpt = tut::load_checkpoint("../../models/stories15M.bin");
         const tut::Config& cfg = ckpt.config;
         const tut::Weights& w = ckpt.weights;
         const size_t vocab = cfg.vocab_size < 0 ? -cfg.vocab_size : cfg.vocab_size;

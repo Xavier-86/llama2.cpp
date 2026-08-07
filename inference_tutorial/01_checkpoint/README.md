@@ -4,7 +4,7 @@
 
 ## Overall task
 
-Fill in the two TODOs in `main.cpp`: parse the header of `../../stories15M.bin` and map the 11 weight tensors out of its weight region:
+Fill in the two TODOs in `main.cpp`: parse the header of `../../models/stories15M.bin` and map the 11 weight tensors out of its weight region:
 
 ```
 [Config header: 7 x int32] [weight region: packed float32]
@@ -22,7 +22,7 @@ This is the only module dedicated to binary parsing. Later modules never parse f
 
 | Variable | Location | Shape | Meaning |
 | --- | --- | --- | --- |
-| `checkpoint_path` | main.cpp | — | path to `../../stories15M.bin` (stories15M, FP32) |
+| `checkpoint_path` | main.cpp | — | path to `../../models/stories15M.bin` (stories15M, FP32) |
 | `buf` | main.cpp, already filled | (file_bytes/4,) float | the whole file: Config header + weight region |
 | `Config` | main.cpp | 7 x int32 | header struct: `dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len` |
 | `Weights` | main.cpp | 12 spans | one `std::span<const float>` view per tensor, to be filled |
@@ -38,7 +38,7 @@ Background you need — the Config header's layout and conventions:
 - fields in order: `dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len`
 - a **negative** `vocab_size` marks unshared classifier weights; stories15M is shared, so it reads +32000
 
-Background you need — how the file gets into memory. `main()` already reads the whole file into a `vector<float>` with `ifstream`; at 15M scale that is fine. The advanced alternative is `mmap` (see `MappedFile` in `../../run.cpp`: zero-copy, essential for big models) — both work here.
+Background you need — how the file gets into memory. `main()` already reads the whole file into a `vector<float>` with `ifstream`; at 15M scale that is fine. The advanced alternative is `mmap` (see `MappedFile` in `../../cpu/run.cpp`: zero-copy, essential for big models) — both work here.
 
 ## Subtask 2: walk the weight region and summarize the tensors (TODO task 2)
 

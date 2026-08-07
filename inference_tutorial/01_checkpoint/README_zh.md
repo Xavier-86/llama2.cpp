@@ -4,7 +4,7 @@
 
 ## 总任务
 
-补全 `main.cpp` 中的两个 TODO：解析 `../../stories15M.bin` 的头部，并映射其权重区中的 11 个权重张量：
+补全 `main.cpp` 中的两个 TODO：解析 `../../models/stories15M.bin` 的头部，并映射其权重区中的 11 个权重张量：
 
 ```
 [Config 头部：7 x int32] [权重区：紧密排列的 float32]
@@ -22,7 +22,7 @@ checkpoint 文件就是一个小二进制头加上按固定顺序紧密排列的
 
 | 变量 | 位置 | 形状 | 含义 |
 | --- | --- | --- | --- |
-| `checkpoint_path` | main.cpp | — | 指向 `../../stories15M.bin`（stories15M，FP32） |
+| `checkpoint_path` | main.cpp | — | 指向 `../../models/stories15M.bin`（stories15M，FP32） |
 | `buf` | main.cpp，已填好 | (file_bytes/4,) float | 整个文件：Config 头部 + 权重区 |
 | `Config` | main.cpp | 7 x int32 | 头部结构体：`dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len` |
 | `Weights` | main.cpp | 12 个 span | 每个张量一个 `std::span<const float>` 视图，待你填充 |
@@ -38,7 +38,7 @@ checkpoint 文件就是一个小二进制头加上按固定顺序紧密排列的
 - 字段依次为：`dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len`
 - `vocab_size` 为**负数**表示分类器权重不共享；stories15M 共享权重，因此读到 +32000
 
-需要的知识——文件如何进入内存。`main()` 已经用 `ifstream` 把整个文件读入 `vector<float>`；15M 规模下这样做完全可行。进阶做法是 `mmap`（见 `../../run.cpp` 中的 `MappedFile`：零拷贝，对大模型至关重要）——两种方式在这里都行。
+需要的知识——文件如何进入内存。`main()` 已经用 `ifstream` 把整个文件读入 `vector<float>`；15M 规模下这样做完全可行。进阶做法是 `mmap`（见 `../../cpu/run.cpp` 中的 `MappedFile`：零拷贝，对大模型至关重要）——两种方式在这里都行。
 
 ## 子任务二：遍历权重区并汇总各张量（TODO task 2）
 

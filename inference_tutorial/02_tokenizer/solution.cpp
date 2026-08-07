@@ -1,7 +1,7 @@
 // 02_tokenizer — reference solution
 //
 // BPE tokenizer for the llama2 vocab: encode (text -> token ids) and
-// decode (id -> text piece), mirroring Tokenizer in ../../run.cpp.
+// decode (id -> text piece), mirroring Tokenizer in ../../cpu/run.cpp.
 //
 // Build:  c++ -O2 -std=c++20 -o solution solution.cpp
 // Run:    ./solution
@@ -27,7 +27,7 @@
 // ---------------------------------------------------------------------------
 
 constexpr int kVocabSize = 32000;
-constexpr const char* kTokenizerPath = "../../tokenizer.bin";
+constexpr const char* kTokenizerPath = "../../models/tokenizer.bin";
 
 // The four prompts to encode. Prompt 0 is the reference prompt used across
 // the tutorial: "Once upon a time" -> [1, 9038, 2501, 263, 931].

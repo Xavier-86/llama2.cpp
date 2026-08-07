@@ -31,7 +31,7 @@ Command-line options (see main / error_usage):
   -s <int>    random seed, default time(NULL)
   -n <int>    number of generation steps, default 256; 0 = seq_len
   -i <string> input prompt
-  -z <string> optional custom tokenizer path, default tokenizer.bin
+  -z <string> optional custom tokenizer path, default models/tokenizer.bin
   -m <string> mode: generate | chat, default generate
   -y <string> optional system prompt in chat mode
 
@@ -802,7 +802,7 @@ void chat(Transformer& transformer, Tokenizer& tokenizer, Sampler& sampler,
 int main(int argc, char* argv[]) {
     try {
         std::string checkpoint_path;
-        std::string tokenizer_path = "tokenizer.bin";
+        std::string tokenizer_path = "models/tokenizer.bin";
         float temperature = 1.0f;
         float topp = 0.9f;
         int steps = 256;

@@ -660,8 +660,8 @@ const int kTokens[] = {1, 9038, 2501, 263, 931};
 
 int main() {
     try {
-        const std::string checkpoint_path = "../../stories15M-q32.bin";
-        const std::string tokenizer_path = "../../tokenizer.bin";
+        const std::string checkpoint_path = "../../models/stories15M-q32.bin";
+        const std::string tokenizer_path = "../../models/tokenizer.bin";
 
         // 12.1: checkpoint header and mapped-weight summary.
         Transformer transformer(checkpoint_path);

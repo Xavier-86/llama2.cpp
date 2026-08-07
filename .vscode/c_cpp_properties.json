@@ -14,6 +14,17 @@
             "cppStandard": "c++20",
             "intelliSenseMode": "macos-clang-arm64",
             "compileCommands": "${workspaceFolder}/compile_commands.json"
+        },
+        {
+            "name": "Linux GCC",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/g++-12",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "linux-gcc-x64"
         }
     ],
     "version": 4

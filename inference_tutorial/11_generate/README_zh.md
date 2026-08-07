@@ -4,7 +4,7 @@
 
 ## 总任务
 
-补全 `main.cpp` 中的 `TODO(task 6)`——`generate()`，把 forward（模块 09）、sampler（模块 10）和 tokenizer（模块 02）串成完整的文本生成流程。这是本模块唯一的新工作；通过它意味着你已重建 FP32 `../../run.cpp`。
+补全 `main.cpp` 中的 `TODO(task 6)`——`generate()`，把 forward（模块 09）、sampler（模块 10）和 tokenizer（模块 02）串成完整的文本生成流程。这是本模块唯一的新工作；通过它意味着你已重建 FP32 `../../cpu/run.cpp`。
 
 前面每个模块都是"一次调用"：一次前向、一次采样。真正的文本生成是一个**循环**——模型每步只预测下一个 token，把这个 token 喂回去，再预测下一个：
 
@@ -26,9 +26,9 @@
 | 变量 | 位置 | 形状 / 布局 | 含义 | 来自模型哪里 |
 | --- | --- | --- | --- | --- |
 | `prompt` | main() 内联 const 字符串 | `"Once upon a time"` | 提示词，encode 后为 `[1, 9038, 2501, 263, 931]`（P=5，含 BOS） | 用户输入 |
-| `transformer.checkpoint.config` | `tut::load_checkpoint("../../stories15M.bin")` | 7 个 int32 | 模型超参数 | checkpoint 头部 |
+| `transformer.checkpoint.config` | `tut::load_checkpoint("../../models/stories15M.bin")` | 7 个 int32 | 模型超参数 | checkpoint 头部 |
 | `transformer.checkpoint.weights` | 同上 | 11 个 `std::span<const float>` | 全部权重张量（见下） | checkpoint 权重区 |
-| `tokenizer`（构造参数） | `tut::load_vocab("../../tokenizer.bin", vocab_size)` | `pieces`(32000,) / `scores`(32000,) | token id → 文本片段 / BPE 合并分数 | tokenizer.bin |
+| `tokenizer`（构造参数） | `tut::load_vocab("../../models/tokenizer.bin", vocab_size)` | `pieces`(32000,) / `scores`(32000,) | token id → 文本片段 / BPE 合并分数 | tokenizer.bin |
 | `steps` | main() 内联 | 64 | 生成步数上限 | — |
 | temperature / topp / seed | main() 内联 | 见下方运行表 | 两组采样参数 | — |
 

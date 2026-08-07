@@ -711,7 +711,7 @@ void chat(Transformer& transformer, Tokenizer& tokenizer, Sampler& sampler,
         "  -s <int>    random seed, default time(NULL)\n"
         "  -n <int>    number of steps to run for, default 256. 0 = max_seq_len\n"
         "  -i <string> input prompt\n"
-        "  -z <string> optional path to custom tokenizer\n"
+        "  -z <string> optional path to custom tokenizer, default models/tokenizer.bin\n"
         "  -m <string> mode: generate|chat, default: generate\n"
         "  -y <string> (optional) system prompt in chat mode");
 }
@@ -720,7 +720,7 @@ int main(int argc, char* argv[]) {
     try {
         // default parameters; std::string replaces char*, no more buffer worries
         std::string checkpoint_path;
-        std::string tokenizer_path = "tokenizer.bin";
+        std::string tokenizer_path = "models/tokenizer.bin";
         float temperature = 1.0f;
         float topp = 0.9f;
         int steps = 256;

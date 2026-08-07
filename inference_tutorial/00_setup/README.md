@@ -23,11 +23,11 @@ No training: load weights, generate tokens one by one.
 
 | File | Used by | Meaning |
 | --- | --- | --- |
-| `../../stories15M.bin` | `../../run.cpp` | FP32 reference model |
-| `../../stories15M-q32.bin` | `../../runq.cpp` | int8-quantized model, group size 32 |
-| `../../tokenizer.bin` | both | vocabulary / tokenizer table |
+| `../../models/stories15M.bin` | `../../cpu/run.cpp` | FP32 reference model |
+| `../../models/stories15M-q32.bin` | `../../cpu/runq.cpp` | int8-quantized model, group size 32 |
+| `../../models/tokenizer.bin` | both | vocabulary / tokenizer table |
 
-**Outputs**: the story printed by `./runcpp ... -t 0.0 -n 64 -s 42 -i "Once upon a time"` must match `data/expected_greedy.txt` exactly (temperature=0 is greedy decoding, so the result is deterministic). `data/expected_greedy.txt` is golden data — do not modify it. The sanity-check `main()` prints the sizes of the three files above, one per line.
+**Outputs**: the story printed by `./cpu/runcpp ... -t 0.0 -n 64 -s 42 -i "Once upon a time"` must match `data/expected_greedy.txt` exactly (temperature=0 is greedy decoding, so the result is deterministic). `data/expected_greedy.txt` is golden data — do not modify it. The sanity-check `main()` prints the sizes of the three files above, one per line.
 
 ## Subtask 1: build the reference and capture the baseline
 
@@ -35,16 +35,16 @@ No TODO in `main.cpp` — this subtask is pure shell work at the repository root
 
 ```bash
 cd ../..   # repository root (llama2_cpp)
-c++ -O3 -std=c++20 -o runcpp run.cpp
-c++ -O3 -std=c++20 -o runqcpp runq.cpp
-./runcpp stories15M.bin -t 0.0 -n 64 -s 42 -i "Once upon a time"
-./runqcpp stories15M-q32.bin -t 0.0 -n 64 -s 42 -i "Once upon a time"
+c++ -O3 -std=c++20 -o cpu/runcpp cpu/run.cpp
+c++ -O3 -std=c++20 -o cpu/runqcpp cpu/runq.cpp
+./cpu/runcpp models/stories15M.bin -t 0.0 -n 64 -s 42 -i "Once upon a time"
+./cpu/runqcpp models/stories15M-q32.bin -t 0.0 -n 64 -s 42 -i "Once upon a time"
 ```
 
 Then verify the first command's output against the golden file (run from the repository root):
 
 ```bash
-diff <(./runcpp stories15M.bin -t 0.0 -n 64 -s 42 -i "Once upon a time" 2>/dev/null) \
+diff <(./cpu/runcpp models/stories15M.bin -t 0.0 -n 64 -s 42 -i "Once upon a time" 2>/dev/null) \
      inference_tutorial/00_setup/data/expected_greedy.txt
 ```
 

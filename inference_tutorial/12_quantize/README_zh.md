@@ -12,8 +12,8 @@
 
 | 变量 | 位置 | 形状 / 布局 | 含义 | 来自模型哪里 |
 | --- | --- | --- | --- | --- |
-| `checkpoint_path` | main.cpp harness（`../../stories15M-q32.bin`） | 256 字节头 + FP32/int8 混合权重区（详见子任务一） | int8 量化 checkpoint，`MappedFile` 只读 mmap | 由仓库根目录的 `quantize` 工具从 `stories15M.bin` 导出（GS=32） |
-| `tokenizer_path` | main.cpp harness（`../../tokenizer.bin`） | [i32 max_token_length] + 32000 条 [f32 score][i32 len][len 字节 piece] | BPE 词表，由 `tut::load_vocab` 解析为 `tut::Vocab` | 与所有 FP32 模块相同 |
+| `checkpoint_path` | main.cpp harness（`../../models/stories15M-q32.bin`） | 256 字节头 + FP32/int8 混合权重区（详见子任务一） | int8 量化 checkpoint，`MappedFile` 只读 mmap | 由仓库根目录的 `quantize` 工具从 `stories15M.bin` 导出（GS=32） |
+| `tokenizer_path` | main.cpp harness（`../../models/tokenizer.bin`） | [i32 max_token_length] + 32000 条 [f32 score][i32 len][len 字节 piece] | BPE 词表，由 `tut::load_vocab` 解析为 `tut::Vocab` | 与所有 FP32 模块相同 |
 | `kX` | data.h | (64,)，两组各 32 个 float | 子任务二 quantize/dequantize 往返的测试向量 | 教学合成数据（镜像 data/input_x.txt） |
 | `kMatmulWQ` | data.h | (3, 8) 行优先，24 个 int8 | 子任务三独立 int8 matmul 的量化权重 | 教学合成数据（此夹具故意用 GS=4） |
 | `kMatmulWS` | data.h | (3, 2) 行优先，6 个 float | w 的逐组 scale | 同上 |
@@ -203,4 +203,4 @@ python3 ../tools/compare.py out_text.txt data/expected_greedy_text.txt --text
 - 测量 FP32 与 int8 版本的 tok/s，检验“带宽 ÷ 字节数”的估算。
 - 阅读 `../tools/dump_fp32.cpp` / `../tools/dump_int8.cpp`，检查自己是否理解每个中间张量。
 - 在 `stories42M.bin` / `stories42M-q32.bin` 上重新运行全部内容（使用工具重新生成数据）。
-- 最后阅读 `../../runq.cpp` 本身：逻辑相同，但以工程级现代 C++ 方式组织。
+- 最后阅读 `../../cpu/runq.cpp` 本身：逻辑相同，但以工程级现代 C++ 方式组织。

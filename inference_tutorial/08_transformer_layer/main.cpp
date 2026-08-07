@@ -201,7 +201,7 @@ void forward_layer0(int token, int pos, const tut::Config& p, const tut::Weights
 int main() {
     try {
         // the checkpoint owns the weight buffer; all weight spans point into it
-        const tut::Checkpoint ckpt = tut::load_checkpoint("../../stories15M.bin");
+        const tut::Checkpoint ckpt = tut::load_checkpoint("../../models/stories15M.bin");
         const tut::Config& cfg = ckpt.config;
         const tut::Weights& w = ckpt.weights;
         const size_t dim = cfg.dim;

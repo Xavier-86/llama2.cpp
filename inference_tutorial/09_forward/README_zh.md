@@ -30,7 +30,7 @@ logits = Wcls @ x                                     #（子任务三）与 emb
 
 checkpoint 解析已由 `../common/checkpoint.h` 的 `tut::load_checkpoint` 完成（它就是模块 01 的打包答案），输出文件的写出用 `../common/io.h`。本模块代码只剩算法本身。
 
-**输入**：提示词输入是 main.cpp 里的 const 数组，模型权重由 `tut::load_checkpoint("../../stories15M.bin")` 加载，返回 `tut::Checkpoint{config, weights, buffer}`，11 个权重张量都是指向 buffer 的 `std::span`，零拷贝：
+**输入**：提示词输入是 main.cpp 里的 const 数组，模型权重由 `tut::load_checkpoint("../../models/stories15M.bin")` 加载，返回 `tut::Checkpoint{config, weights, buffer}`，11 个权重张量都是指向 buffer 的 `std::span`，零拷贝：
 
 | 变量 | 位置 | 形状 | 布局 | 含义 | 来自模型哪里 |
 | --- | --- | --- | --- | --- | --- |

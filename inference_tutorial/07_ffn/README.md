@@ -28,7 +28,7 @@ One up-projection is passed through the SiLU activation and multiplied elementwi
 | Variable | Location | Shape | Layout | Meaning | Where it comes from |
 | --- | --- | --- | --- | --- | --- |
 | `kX` | data.h | (288,) | 1-D float array | FFN input: x at the last prompt position after `rms_ffn_weight` normalization | layer 0 FFN entry (mirror of `data/input_x.txt`) |
-| `ckpt.weights.w1` | `tut::load_checkpoint("../../stories15M.bin")` | (6, 768, 288) = (n_layers, hidden_dim, dim) | row-major, hidden_dim rows of dim per layer | up-projection weights (gate branch) | `w1` tensor in the checkpoint weight region; layer-l slice starts at `l * hidden_dim * dim` |
+| `ckpt.weights.w1` | `tut::load_checkpoint("../../models/stories15M.bin")` | (6, 768, 288) = (n_layers, hidden_dim, dim) | row-major, hidden_dim rows of dim per layer | up-projection weights (gate branch) | `w1` tensor in the checkpoint weight region; layer-l slice starts at `l * hidden_dim * dim` |
 | `ckpt.weights.w3` | same | (6, 768, 288) | row-major, same as w1 | up-projection weights (linear branch) | `w3` tensor in the checkpoint; layer-l slice starts at `l * hidden_dim * dim` |
 | `ckpt.weights.w2` | same | (6, 288, 768) = (n_layers, dim, hidden_dim) | row-major, dim rows of hidden_dim per layer | down-projection weights | `w2` tensor in the checkpoint; layer-l slice starts at `l * dim * hidden_dim` |
 

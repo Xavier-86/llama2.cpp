@@ -30,7 +30,7 @@ Because the single layer is already verified, this module gives you all of it: t
 
 Checkpoint parsing is already done by `tut::load_checkpoint` in `../common/checkpoint.h` (it is the packaged answer of module 01), and output files are written with `../common/io.h`. Only the algorithms remain in this module's code.
 
-**Inputs**: the prompt is a const array in main.cpp; the model weights are loaded by `tut::load_checkpoint("../../stories15M.bin")`, which returns `tut::Checkpoint{config, weights, buffer}` — the 11 weight tensors are `std::span` views into the buffer, zero-copy:
+**Inputs**: the prompt is a const array in main.cpp; the model weights are loaded by `tut::load_checkpoint("../../models/stories15M.bin")`, which returns `tut::Checkpoint{config, weights, buffer}` — the 11 weight tensors are `std::span` views into the buffer, zero-copy:
 
 | Variable | Location | Shape | Layout | Meaning | Where in the model |
 | --- | --- | --- | --- | --- | --- |

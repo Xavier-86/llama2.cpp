@@ -30,7 +30,7 @@
 // ---------------------------------------------------------------------------
 
 constexpr int kVocabSize = 32000;
-constexpr const char* kTokenizerPath = "../../tokenizer.bin";
+constexpr const char* kTokenizerPath = "../../models/tokenizer.bin";
 
 // The four prompts to encode. Prompt 0 is the reference prompt used across
 // the tutorial: "Once upon a time" -> [1, 9038, 2501, 263, 931].

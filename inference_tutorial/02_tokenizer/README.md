@@ -11,9 +11,9 @@ Fill in the four TODOs of the `Tokenizer` class in `main.cpp`, implementing both
 [1, 9038, 2501, 263, 931]     --decode-->  "Once upon a time"
 ```
 
-The model never sees text — only integer sequences; the tokenizer converts between the two. This module implements the same BPE (byte-pair encoding) algorithm as `Tokenizer` in `../../run.cpp`: split the text into single-character tokens, then greedily merge adjacent pairs by vocab score.
+The model never sees text — only integer sequences; the tokenizer converts between the two. This module implements the same BPE (byte-pair encoding) algorithm as `Tokenizer` in `../../cpu/run.cpp`: split the text into single-character tokens, then greedily merge adjacent pairs by vocab score.
 
-Standalone module: no model weights needed, only the vocab file `../../tokenizer.bin`. Vocab parsing is already handled by `tut::load_vocab(path, vocab_size)` (`../common/tokenizer.h`), which returns `tut::Vocab{pieces, scores, max_token_length}`: `pieces[id]` is the token's text piece, `scores[id]` its BPE merge score.
+Standalone module: no model weights needed, only the vocab file `../../models/tokenizer.bin`. Vocab parsing is already handled by `tut::load_vocab(path, vocab_size)` (`../common/tokenizer.h`), which returns `tut::Vocab{pieces, scores, max_token_length}`: `pieces[id]` is the token's text piece, `scores[id]` its BPE merge score.
 
 **Inputs**: const variables in main.cpp (except the vocab) — no data files to parse:
 

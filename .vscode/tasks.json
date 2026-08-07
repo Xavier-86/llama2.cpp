@@ -2,7 +2,7 @@
     "tasks": [
         {
             "type": "cppbuild",
-            "label": "C/C++: clang++ build active file",
+            "label": "Mac: clang++ build active file",
             "command": "/usr/bin/clang++",
             "args": [
                 "-fcolor-diagnostics",
@@ -24,11 +24,11 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "detail": "Build the currently active C++ file with clang++."
+            "detail": "Build the currently active C++ file with clang++ (macOS)."
         },
         {
             "type": "cppbuild",
-            "label": "build runcpp_dbg",
+            "label": "Mac: build runcpp_dbg",
             "command": "/usr/bin/clang++",
             "args": [
                 "-fcolor-diagnostics",
@@ -36,9 +36,9 @@
                 "-std=c++20",
                 "-g",
                 "-O0",
-                "${workspaceFolder}/run.cpp",
+                "${workspaceFolder}/cpu/run.cpp",
                 "-o",
-                "${workspaceFolder}/runcpp_dbg"
+                "${workspaceFolder}/cpu/runcpp_dbg"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
@@ -47,11 +47,11 @@
                 "$gcc"
             ],
             "group": "build",
-            "detail": "Debug build of run.cpp."
+            "detail": "Debug build of run.cpp with clang++ (macOS)."
         },
         {
             "type": "cppbuild",
-            "label": "build runqcpp_dbg",
+            "label": "Mac: build runqcpp_dbg",
             "command": "/usr/bin/clang++",
             "args": [
                 "-fcolor-diagnostics",
@@ -59,9 +59,9 @@
                 "-std=c++20",
                 "-g",
                 "-O0",
-                "${workspaceFolder}/runq.cpp",
+                "${workspaceFolder}/cpu/runq.cpp",
                 "-o",
-                "${workspaceFolder}/runqcpp_dbg"
+                "${workspaceFolder}/cpu/runqcpp_dbg"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
@@ -70,7 +70,73 @@
                 "$gcc"
             ],
             "group": "build",
-            "detail": "Debug build of runq.cpp."
+            "detail": "Debug build of runq.cpp with clang++ (macOS)."
+        },
+        {
+            "type": "cppbuild",
+            "label": "Linux: g++-12 build active file",
+            "command": "/usr/bin/g++-12",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-std=c++20",
+                "-g",
+                "-O0",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "detail": "Build the currently active C++ file with g++-12 (Linux)."
+        },
+        {
+            "type": "cppbuild",
+            "label": "Linux: build runcpp_dbg",
+            "command": "/usr/bin/g++-12",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-std=c++20",
+                "-g",
+                "-O0",
+                "${workspaceFolder}/cpu/run.cpp",
+                "-o",
+                "${workspaceFolder}/cpu/runcpp_dbg"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "detail": "Debug build of run.cpp with g++-12 (Linux)."
+        },
+        {
+            "type": "cppbuild",
+            "label": "Linux: build runqcpp_dbg",
+            "command": "/usr/bin/g++-12",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-std=c++20",
+                "-g",
+                "-O0",
+                "${workspaceFolder}/cpu/runq.cpp",
+                "-o",
+                "${workspaceFolder}/cpu/runqcpp_dbg"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "detail": "Debug build of runq.cpp with g++-12 (Linux)."
         }
     ],
     "version": "2.0.0"

@@ -4,7 +4,7 @@
 
 ## Overall task
 
-Fill in `TODO(task 6)` — `generate()` in `main.cpp` — wiring forward (module 09) + sampler (module 10) + tokenizer (module 02) into full text generation. This is the only new work in the module; passing it means you have rebuilt the FP32 `../../run.cpp`.
+Fill in `TODO(task 6)` — `generate()` in `main.cpp` — wiring forward (module 09) + sampler (module 10) + tokenizer (module 02) into full text generation. This is the only new work in the module; passing it means you have rebuilt the FP32 `../../cpu/run.cpp`.
 
 Every earlier module was a single call: one forward pass, one sample. Real text generation is a **loop** — the model predicts only the next token per step, that token is fed back, and the next one is predicted:
 
@@ -26,9 +26,9 @@ The plumbing is already in place: checkpoint parsing (the product of module 01) 
 | Variable | Location | Shape / layout | Meaning | Where it comes from |
 | --- | --- | --- | --- | --- |
 | `prompt` | inline const string in main() | `"Once upon a time"` | the prompt; encodes to `[1, 9038, 2501, 263, 931]` (P=5, BOS included) | user input |
-| `transformer.checkpoint.config` | `tut::load_checkpoint("../../stories15M.bin")` | 7 × int32 | model hyperparameters | checkpoint header |
+| `transformer.checkpoint.config` | `tut::load_checkpoint("../../models/stories15M.bin")` | 7 × int32 | model hyperparameters | checkpoint header |
 | `transformer.checkpoint.weights` | same | 11 × `std::span<const float>` | all weight tensors (see below) | checkpoint weight region |
-| `tokenizer` (ctor arg) | `tut::load_vocab("../../tokenizer.bin", vocab_size)` | `pieces`(32000,) / `scores`(32000,) | token id → text piece / BPE merge score | tokenizer.bin |
+| `tokenizer` (ctor arg) | `tut::load_vocab("../../models/tokenizer.bin", vocab_size)` | `pieces`(32000,) / `scores`(32000,) | token id → text piece / BPE merge score | tokenizer.bin |
 | `steps` | inline in main() | 64 | generation step cap | — |
 | temperature / topp / seed | inline in main() | see the run table below | the two sampler configurations | — |
 

@@ -55,7 +55,7 @@ python3 ../tools/compare.py out.txt data/expected_xxx.txt --text
 
 Build with: `c++ -O2 -std=c++20 -o main main.cpp`
 
-Try not to read `solution.cpp` (or the reference `../run.cpp` / `../runq.cpp`)
+Try not to read `solution.cpp` (or the reference `../cpu/run.cpp` / `../cpu/runq.cpp`)
 before you have your own version passing. Peek when stuck, then close it.
 
 ## Module roadmap
@@ -81,8 +81,8 @@ quantization and gives you `runq.cpp`.
 
 ## Test setup and data conventions
 
-- Models: `../../stories15M.bin` (FP32) and `../../stories15M-q32.bin` (int8, GS=32);
-  tokenizer: `../../tokenizer.bin`
+- Models: `../../models/stories15M.bin` (FP32) and `../../models/stories15M-q32.bin` (int8, GS=32);
+  tokenizer: `../../models/tokenizer.bin`
 - Model config: dim=288, hidden_dim=768, n_layers=6, n_heads=6, n_kv_heads=6,
   vocab_size=32000, seq_len=256 (head_size=48, kv_dim=288)
 - Reference prompt: `"Once upon a time"` -> token ids `[1, 9038, 2501, 263, 931]`,
@@ -114,8 +114,8 @@ the repository root:
 ```bash
 c++ -O2 -std=c++20 -o inference_tutorial/tools/dump_fp32 inference_tutorial/tools/dump_fp32.cpp
 c++ -O2 -std=c++20 -o inference_tutorial/tools/dump_int8 inference_tutorial/tools/dump_int8.cpp
-./inference_tutorial/tools/dump_fp32 inference_tutorial stories15M.bin tokenizer.bin
-./inference_tutorial/tools/dump_int8 inference_tutorial stories15M-q32.bin tokenizer.bin
+./inference_tutorial/tools/dump_fp32 inference_tutorial models/stories15M.bin models/tokenizer.bin
+./inference_tutorial/tools/dump_int8 inference_tutorial models/stories15M-q32.bin models/tokenizer.bin
 python3 inference_tutorial/tools/embed_data.py inference_tutorial
 ```
 

@@ -12,8 +12,8 @@ Why quantization is faster: every decode step reads all weights once; speed ≈ 
 
 | Variable | Location | Shape / layout | Meaning | Where it comes from |
 | --- | --- | --- | --- | --- |
-| `checkpoint_path` | main.cpp harness (`../../stories15M-q32.bin`) | 256-byte header + mixed FP32/int8 weight region (see subtask 1) | int8 quantized checkpoint, read-only mmap via `MappedFile` | exported from `stories15M.bin` by the repo-root `quantize` tool (GS=32) |
-| `tokenizer_path` | main.cpp harness (`../../tokenizer.bin`) | [i32 max_token_length] + 32000 records of [f32 score][i32 len][len bytes of piece] | BPE vocab, parsed by `tut::load_vocab` into `tut::Vocab` | same as every FP32 module |
+| `checkpoint_path` | main.cpp harness (`../../models/stories15M-q32.bin`) | 256-byte header + mixed FP32/int8 weight region (see subtask 1) | int8 quantized checkpoint, read-only mmap via `MappedFile` | exported from `stories15M.bin` by the repo-root `quantize` tool (GS=32) |
+| `tokenizer_path` | main.cpp harness (`../../models/tokenizer.bin`) | [i32 max_token_length] + 32000 records of [f32 score][i32 len][len bytes of piece] | BPE vocab, parsed by `tut::load_vocab` into `tut::Vocab` | same as every FP32 module |
 | `kX` | data.h | (64,), two groups of 32 floats | test vector for the subtask-2 quantize/dequantize round-trip | synthetic teaching data (mirrors data/input_x.txt) |
 | `kMatmulWQ` | data.h | (3, 8) row-major, 24 int8 | quantized weights of the subtask-3 standalone matmul | synthetic teaching data (this fixture deliberately uses GS=4) |
 | `kMatmulWS` | data.h | (3, 2) row-major, 6 floats | per-group scales of w | same |
@@ -255,5 +255,5 @@ Congratulations — you have fully rebuilt `runq.cpp`. Natural follow-ups:
   understanding of every intermediate tensor
 - Re-run everything on `stories42M.bin` / `stories42M-q32.bin` (regenerate the
   data with the tools)
-- Finally read `../../runq.cpp` itself: same logic, organized as engineering-
+- Finally read `../../cpu/runq.cpp` itself: same logic, organized as engineering-
   grade modern C++

@@ -47,7 +47,7 @@ struct Weights {
 };
 
 int main() {
-    const std::string checkpoint_path = "../../stories15M.bin";
+    const std::string checkpoint_path = "../../models/stories15M.bin";
 
     // read the whole file into a float buffer (15M model: simple ifstream is fine)
     std::ifstream in(checkpoint_path, std::ios::binary | std::ios::ate);

@@ -10,7 +10,7 @@
 // e.g.:  ./dump_fp32 inference_tutorial stories15M.bin tokenizer.bin
 
 #define main llama2_reference_cli_main
-#include "../../run.cpp"
+#include "../../cpu/run.cpp"
 #undef main
 
 #include "dump_common.h"
