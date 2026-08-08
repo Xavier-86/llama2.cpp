@@ -1,7 +1,7 @@
 # llama2.cpp：纯 C++ 最小 LLM 推理 <span style="float: right;"><a href="README.md">English</a></span>
 
-> [karpathy/llama2.c](https://github.com/karpathy/llama2.c) 的现代 C++（C++20）重写版，用于学习 LLM 推理原理。
-> 与原版差异：RAII 内存管理（`std::vector` / mmap 封装类）、`std::span` 视图传参、`std::string` / `std::string_view`、异常处理、iostream、`std::sort`/`std::lower_bound`。数值行为与原版等价，但代码结构不追求逐行对应。
+> 一个面向学习的 Llama 2 推理实现，基于 [karpathy/llama2.c](https://github.com/karpathy/llama2.c) 开发。
+> 项目包含 CPU 与 GPU 两套实现：CPU 版本使用现代 C++20 编写，支持 FP32 和 int8 推理；GPU 版本基于 CUDA，通过 cuBLAS 与手写 kernel 实现完整推理流程。两套实现采用统一的模型格式和命令行接口，方便对照阅读源码、验证数值一致性，并比较两者的推理性能。
 
 ## 项目结构
 
@@ -19,8 +19,7 @@
 - **支持 C++20 的编译器**（`std::span`、`std::ranges`、`std::from_chars`）：
   - macOS：系统自带 `/usr/bin/clang++`（Apple Clang 15+，装 Xcode Command Line Tools 即可）
   - Linux：GCC 11+ 或 Clang 14+，例如 `sudo apt install g++-12`。如果默认 `c++` 太旧（Ubuntu 的 GCC 9.5 连 `-std=c++20` 都不认），用带版本号的命令：`g++-12 -O3 -std=c++20 ...`
-  - Windows：`run.cpp` / `runq.cpp` 依赖 POSIX `mmap`，不能用 MSVC
-- **模型权重**：从 [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) 下载 `stories15M.bin` / `stories42M.bin` 放到 `models/`（权重通过 git LFS 跟踪；如果 clone 下来只有约 130 字节的指针文件，需要重新下载）。`models/tokenizer.bin` 已包含在仓库中。
+- **模型权重**：从 [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) 下载 `stories15M.bin` / `stories42M.bin` 并放入 `models/`。权重文件由 Git LFS 管理，请确保已拉取完整文件。仓库已包含 `models/tokenizer.bin`。
 
 ## 快速开始
 

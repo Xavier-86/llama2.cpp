@@ -1,7 +1,7 @@
 # llama2.cpp: Minimal LLM Inference in Pure C++ <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
-> A modern C++ (C++20) rewrite of [karpathy/llama2.c](https://github.com/karpathy/llama2.c), for learning how LLM inference works.
-> Differences from the original: RAII memory management (`std::vector` / mmap wrapper class), `std::span` for buffer passing, `std::string` / `std::string_view`, exceptions, iostreams, `std::sort` / `std::lower_bound`. Numerically equivalent to the original, but the code does not try to mirror it line by line.
+> A learning-oriented Llama 2 inference implementation with both CPU and GPU backends, based on [karpathy/llama2.c](https://github.com/karpathy/llama2.c).
+> The CPU backend provides FP32 and int8 inference in modern C++20. The GPU backend implements the corresponding inference paths with CUDA, using cuBLAS and hand-written kernels. Both backends share the same model format and command-line interface, making it easy to compare their implementations, numerical results, and performance side by side.
 
 ## Project structure
 
@@ -19,8 +19,7 @@
 - **Compiler with C++20** (`std::span`, `std::ranges`, `std::from_chars`):
   - macOS: system `/usr/bin/clang++` (Apple Clang 15+, Xcode Command Line Tools)
   - Linux: GCC 11+ or Clang 14+ — e.g. `sudo apt install g++-12`. If the default `c++` is older (Ubuntu's GCC 9.5 doesn't even accept `-std=c++20`), call the versioned binary explicitly: `g++-12 -O3 -std=c++20 ...`
-  - Windows: `run.cpp` / `runq.cpp` need POSIX `mmap`, so no MSVC
-- **Model weights**: download `stories15M.bin` / `stories42M.bin` from [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) into `models/` (they are tracked in git via LFS; if your clone only has ~130-byte pointer files, re-download). `models/tokenizer.bin` is included.
+- **Model weights**: download `stories15M.bin` / `stories42M.bin` from [karpathy/tinyllamas](https://huggingface.co/karpathy/tinyllamas) into `models/`. The weights are managed with Git LFS; make sure the complete files have been fetched. `models/tokenizer.bin` is included.
 
 ## Quick start
 
