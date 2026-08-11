@@ -21,6 +21,7 @@ nvcc -O3 -std=c++20 -ccbin g++-13 -arch=sm_89 -o gpu/runqgpu gpu/runqgpu.cu
 # Run
 ./gpu/rungpu models/stories15M.bin -t 0.0 -n 128 -s 42 -i "Once upon a time"
 ./gpu/runqgpu models/stories15M-q32.bin -t 0.0 -n 128 -s 42 -i "Once upon a time"
+./gpu/runqgpu models/stories15M-q32.bin -k naive -t 0.0 -n 128 -s 42 -i "..."  # -k naive|fused (default fused)
 ```
 
 **Step-by-step tutorial: [`gpu_tutorial/`](../gpu_tutorial/README.md)** —
@@ -30,6 +31,45 @@ from environment setup to exact output alignment with the CPU implementation.
 Compile-verified on an RTX 4080 SUPER (sm_89) with CUDA 12.8. Note: CUDA 12.0's
 nvcc rejected this code (host-side C++20 headers with the system g++), so CUDA
 12.8 + g++-13 was used.
+
+## Alibaba PPU (PPU-ZW810E)
+
+The PPU SDK (v2.0.0) ships a CUDA 12.8-compatible toolchain (nvcc + cuBLAS), so
+both files build and run unmodified — the default host g++ is new enough, and
+`-ccbin`/`-arch` must be left out:
+
+```bash
+nvcc -O3 -std=c++20 -o rungpu gpu/rungpu.cu -lcublas
+nvcc -O3 -std=c++20 -o runqgpu gpu/runqgpu.cu
+```
+
+Two PPU-specific gotchas:
+
+- **Do not pass `-arch=sm_89`**: it compiles, but the binary silently produces
+  garbage output (`<unk><unk>...`). Omitting `-arch` lets nvcc target the PPU
+  natively and gives correct results.
+- If the repo sits on a network filesystem (ossfs), link the binary to a local
+  disk (`-o /tmp/rungpu`); `ld` fails with `final link failed: file truncated`
+  when writing the executable to ossfs.
+
+Correctness (`-t 0.0 -n 256 -s 42 -i "Once upon a time"`): FP32 output matches
+`cpu/runcpp` exactly for both stories models. The int8 outputs are coherent
+stories but may diverge from `cpu/runqcpp` at a near-tie argmax (expected, see
+[`docs/quantization.md`](../docs/quantization.md)); the fused kernel matched the
+CPU text exactly on stories42M.
+
+Measured on the PPU-ZW810E (same options as above), FP32 vs int8 (GS=32):
+
+| Model | Size | tok/s FP32 (cuBLAS) | tok/s int8 naive kernel | tok/s int8 fused kernel |
+| --- | --- | --- | --- | --- |
+| stories15M | 58 MB → 17 MB | ~1660 | ~1640 | ~1350 |
+| stories42M | 160 MB → 45 MB | ~1136 | ~944 | ~972 |
+
+Unlike on the RTX 4080 SUPER, cuBLAS FP32 stays fastest on the PPU: the fused
+kernel's bandwidth win does not materialize there. The naive kernel beats the
+fused one on the tiny 15M matrices (fewer launches win over per-warp reduction
+overhead), while the fused kernel pulls ahead on 42M. Quantization still cuts
+the model's device memory 4×, which can matter more than speed on this device.
 
 Measured on the RTX 4080 SUPER (`-t 0.0 -n 256 -i "Once upon a time"`), FP32 vs
 int8 (GS=32):

@@ -18,11 +18,37 @@ nvcc -O3 -std=c++20 -ccbin g++-13 -arch=sm_89 -o gpu/runqgpu gpu/runqgpu.cu
 # 运行
 ./gpu/rungpu models/stories15M.bin -t 0.0 -n 128 -s 42 -i "Once upon a time"
 ./gpu/runqgpu models/stories15M-q32.bin -t 0.0 -n 128 -s 42 -i "Once upon a time"
+./gpu/runqgpu models/stories15M-q32.bin -k naive -t 0.0 -n 128 -s 42 -i "..."  # -k naive|fused（默认 fused）
 ```
 
 **分步教程：[`gpu_tutorial/`](../gpu_tutorial/README_zh.md)** —— `rungpu.cu` 就是模块 06 的最终成品。八个模块涵盖从环境准备到与 CPU 版本输出逐字对齐的完整过程。
 
 已在 RTX 4080 SUPER（sm_89）+ CUDA 12.8 上通过编译验证。注意：CUDA 12.0 的 nvcc 无法编译这份代码（系统 g++ 的 C++20 头文件不兼容），因此使用了 CUDA 12.8 + g++-13。
+
+## 阿里 PPU（PPU-ZW810E）
+
+PPU SDK（v2.0.0）自带 CUDA 12.8 兼容工具链（nvcc + cuBLAS），两个文件无需修改即可编译运行——默认 g++ 版本已足够新，且不要加 `-ccbin`/`-arch`：
+
+```bash
+nvcc -O3 -std=c++20 -o rungpu gpu/rungpu.cu -lcublas
+nvcc -O3 -std=c++20 -o runqgpu gpu/runqgpu.cu
+```
+
+两个 PPU 特有的坑：
+
+- **不要传 `-arch=sm_89`**：能编译，但二进制会静默输出乱码（`<unk><unk>...`）。省略 `-arch` 让 nvcc 按 PPU 原生目标编译，结果才正确。
+- 如果仓库在网络文件系统（ossfs）上，把二进制链接到本地磁盘（`-o /tmp/rungpu`）；往 ossfs 写可执行文件会让 `ld` 报 `final link failed: file truncated`。
+
+正确性（`-t 0.0 -n 256 -s 42 -i "Once upon a time"`）：两个 stories 模型的 FP32 输出都与 `cpu/runcpp` 逐字一致。int8 输出都是连贯的故事，但可能在接近平局的 argmax 处与 `cpu/runqcpp` 分道扬镳（预期行为，见 [`docs/quantization_zh.md`](../docs/quantization_zh.md)）；其中融合 kernel 在 stories42M 上与 CPU 文本完全一致。
+
+PPU-ZW810E 实测（参数同上），FP32 对比 int8（GS=32）：
+
+| 模型 | 体积 | tok/s FP32 (cuBLAS) | tok/s int8 naive kernel | tok/s int8 融合 kernel |
+| --- | --- | --- | --- | --- |
+| stories15M | 58 MB → 17 MB | ~1660 | ~1640 | ~1350 |
+| stories42M | 160 MB → 45 MB | ~1136 | ~944 | ~972 |
+
+与 RTX 4080 SUPER 不同，PPU 上 cuBLAS FP32 仍然最快：融合 kernel 的带宽优势在这款设备上没有兑现。15M 的小矩阵上 naive 反而快于融合版（少一次 launch 比 warp 归约的开销更划算），42M 上融合版才反超 naive。量化仍然能把模型显存占用降为 1/4——在这台设备上，省显存可能比提速更有意义。
 
 实测（RTX 4080 SUPER，`-t 0.0 -n 256 -i "Once upon a time"`），FP32 对比 int8（GS=32）：
 
