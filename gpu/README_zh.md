@@ -1,62 +1,69 @@
 # GPU 推理 <span style="float: right;"><a href="README.md">English</a></span>
 
-使用 cuBLAS 和手写 CUDA kernel 实现 GPU 推理。FP32 矩阵乘法使用 cuBLAS，量化推理使用手写 int8 kernel；其余算子（RMSNorm、RoPE、softmax、attention 和 SwiGLU）全部手写。
+GPU 实现按目标硬件拆成三个目录。FP32 路径由 cuBLAS 执行，int8 路径使用手写 CUDA kernel；checkpoint 加载、tokenizer、sampler 和 CLI 与 CPU 版本共用。
 
-| 文件 | 说明 |
-| --- | --- |
-| `rungpu.cu` | FP32 推理，与 `cpu/run.cpp` 一一对应 |
-| `runqgpu.cu` | int8 量化推理，与 `cpu/runq.cpp` 一一对应 |
+| 目录 | 内容 | 用途 |
+| --- | --- | --- |
+| `default/` | `rungpu.cu`、`runqgpu.cu` | 预设 FP32、普通 int8 与共享实现 |
+| `4080s/` | `runqgpu.cu`、`bench.sh` | RTX 4080 SUPER 专用融合 int8 GEMV 与测试 |
+| `ppu/` | `runqgpu.cu`、`test_qgemv.cu`、`bench.sh` | 真武 810E PPU 专用 int8 GEMV 与测试 |
 
-两个文件都通过 `#include` 复用对应 CPU 版本的 host 代码（checkpoint 加载、tokenizer、sampler 和 CLI），仅在 GPU 上实现 forward。
+`default/runqgpu_impl.cuh` 是三种 int8 入口共用的内部实现。每个 `runqgpu.cu` 在编译期固定自己的 kernel，不需要也不接受 `-k` 参数。
 
-```bash
-# 从仓库根目录编译（host 编译器需支持 C++20；CUDA 12.8 下默认的 g++-9 太旧，
-# 这里显式指定 g++-13）
-nvcc -O3 -std=c++20 -ccbin g++-13 -arch=sm_89 -o gpu/rungpu gpu/rungpu.cu -lcublas
-nvcc -O3 -std=c++20 -ccbin g++-13 -arch=sm_89 -o gpu/runqgpu gpu/runqgpu.cu
-
-# 运行
-./gpu/rungpu models/stories15M.bin -t 0.0 -n 128 -s 42 -i "Once upon a time"
-./gpu/runqgpu models/stories15M-q32.bin -t 0.0 -n 128 -s 42 -i "Once upon a time"
-./gpu/runqgpu models/stories15M-q32.bin -k naive -t 0.0 -n 128 -s 42 -i "..."  # -k naive|fused（默认 fused）
-```
-
-**分步教程：[`gpu_tutorial/`](../gpu_tutorial/README_zh.md)** —— `rungpu.cu` 就是模块 06 的最终成品。八个模块涵盖从环境准备到与 CPU 版本输出逐字对齐的完整过程。
-
-已在 RTX 4080 SUPER（sm_89）+ CUDA 12.8 上通过编译验证。注意：CUDA 12.0 的 nvcc 无法编译这份代码（系统 g++ 的 C++20 头文件不兼容），因此使用了 CUDA 12.8 + g++-13。
-
-## 阿里 PPU（PPU-ZW810E）
-
-PPU SDK（v2.0.0）自带 CUDA 12.8 兼容工具链（nvcc + cuBLAS），两个文件无需修改即可编译运行——默认 g++ 版本已足够新，且不要加 `-ccbin`/`-arch`：
+## RTX 4080 SUPER
 
 ```bash
-nvcc -O3 -std=c++20 -o rungpu gpu/rungpu.cu -lcublas
-nvcc -O3 -std=c++20 -o runqgpu gpu/runqgpu.cu
+# CUDA 12.8，源码已在 sm_89 上验证
+nvcc -O3 -std=c++20 -ccbin g++-13 -arch=sm_89 \
+  -o /tmp/rungpu gpu/default/rungpu.cu -lcublas
+nvcc -O3 -std=c++20 -ccbin g++-13 -arch=sm_89 \
+  -o /tmp/runqgpu-default gpu/default/runqgpu.cu
+nvcc -O3 -std=c++20 -ccbin g++-13 -arch=sm_89 \
+  -o /tmp/runqgpu-4080s gpu/4080s/runqgpu.cu
+
+/tmp/runqgpu-4080s models/stories15M-q32.bin \
+  -t 0.0 -n 256 -s 42 -i "Once upon a time"
 ```
 
-两个 PPU 特有的坑：
+实测参数：`-t 0.0 -n 256 -s 42 -i "Once upon a time"`，量化 group size 为 32。
 
-- **不要传 `-arch=sm_89`**：能编译，但二进制会静默输出乱码（`<unk><unk>...`）。省略 `-arch` 让 nvcc 按 PPU 原生目标编译，结果才正确。
-- 如果仓库在网络文件系统（ossfs）上，把二进制链接到本地磁盘（`-o /tmp/rungpu`）；往 ossfs 写可执行文件会让 `ld` 报 `final link failed: file truncated`。
+| 模型 | FP32 | int8 | RTX 4080s 优化 int8 |
+| --- | ---: | ---: | ---: |
+| stories15M | ~2660 tok/s | ~2200 tok/s | ~3060 tok/s |
+| stories42M | ~1490 tok/s | ~1510 tok/s | ~2100 tok/s |
 
-正确性（`-t 0.0 -n 256 -s 42 -i "Once upon a time"`）：两个 stories 模型的 FP32 输出都与 `cpu/runcpp` 逐字一致。int8 输出都是连贯的故事，但可能在接近平局的 argmax 处与 `cpu/runqcpp` 分道扬镳（预期行为，见 [`docs/quantization_zh.md`](../docs/quantization_zh.md)）；其中融合 kernel 在 stories42M 上与 CPU 文本完全一致。
+4080s 版本使用融合的 warp-per-row GEMV：`float4`/`int8x4` 向量化加载、分段 warp 归约、在线激活量化和 `__dp4a` 点积，避免单独启动量化 kernel。
 
-PPU-ZW810E 实测（参数同上），FP32 对比 int8（GS=32）：
+三种实现各跑三轮：`./gpu/4080s/bench.sh`。
 
-| 模型 | 体积 | tok/s FP32 (cuBLAS) | tok/s int8 naive kernel | tok/s int8 融合 kernel |
-| --- | --- | --- | --- | --- |
-| stories15M | 58 MB → 17 MB | ~1660 | ~1640 | ~1350 |
-| stories42M | 160 MB → 45 MB | ~1136 | ~944 | ~972 |
+## 真武 810E PPU
 
-与 RTX 4080 SUPER 不同，PPU 上 cuBLAS FP32 仍然最快：融合 kernel 的带宽优势在这款设备上没有兑现。15M 的小矩阵上 naive 反而快于融合版（少一次 launch 比 warp 归约的开销更划算），42M 上融合版才反超 naive。量化仍然能把模型显存占用降为 1/4——在这台设备上，省显存可能比提速更有意义。
+PPU SDK v2.0 使用 CUDA 兼容工具链。不要传 `-arch=sm_89`，让编译器生成 PPU 原生目标；如果仓库位于 ossfs，建议把可执行文件输出到 `/tmp`。
 
-实测（RTX 4080 SUPER，`-t 0.0 -n 256 -i "Once upon a time"`），FP32 对比 int8（GS=32）：
+```bash
+nvcc -O3 -std=c++20 -o /tmp/rungpu gpu/default/rungpu.cu -lcublas
+nvcc -O3 -std=c++20 -o /tmp/runqgpu-default gpu/default/runqgpu.cu
+nvcc -O3 -std=c++20 -o /tmp/runqgpu-ppu gpu/ppu/runqgpu.cu
 
-| 模型 | 体积 | tok/s FP32 (cuBLAS) | tok/s int8 naive kernel | tok/s int8 融合 kernel |
-| --- | --- | --- | --- | --- |
-| stories15M | 58 MB → 17 MB | ~2660 | ~2200 | ~3060 |
-| stories42M | 160 MB → 45 MB | ~1490 | ~1510 | ~2100 |
+/tmp/runqgpu-ppu models/stories15M-q32.bin \
+  -t 0.0 -n 256 -s 42 -i "Once upon a time"
+```
 
-"naive kernel" 指第一版 int8 实现（一个 block 算一行、逐字节加载、每次 matmul 前单独跑 `quantize_kernel`）；"融合 kernel" 指下面介绍的当前 `qmatmul_kernel`。
+| 模型 | FP32 | int8 | PPU 优化 int8 |
+| --- | ---: | ---: | ---: |
+| stories15M | ~1660 tok/s | ~1640 tok/s | 待 PPU 驱动环境实测 |
+| stories42M | ~1136 tok/s | ~944 tok/s | 待 PPU 驱动环境实测 |
 
-CPU 上 int8 decode 提速约 10 倍，因为 decode 是带宽受限的（见 [`docs/quantization_zh.md`](../docs/quantization_zh.md)）。GPU 上这个结论成立的前提是 int8 kernel 真的利用到权重读取量减少 4 倍的优势：naive 版本比 cuBLAS FP32 还慢，因为 launch 开销和空转线程抵消了带宽收益。现在的 `qmatmul_kernel` 是融合的 warp-per-row GEMV（float4 / int8x4 向量化加载、warp 分段归约在线量化激活、`__dp4a` 点积、不再单独 launch 量化 kernel），让 int8 反超 FP32——而且模型越大优势越明显，符合带宽受限负载的预期。量化同时还能把显存占用降为 1/4。
+PPU 版本针对原融合 kernel 在 810E 上的低效点重新设计：每个 warp 并行处理四个 32 元素量化组，激活只量化一次并复用，Q/K/V 合并为一次 launch，W1/W3 合并为一次 launch，GEMV 使用 `int8x4 + __dp4a`。当前要求 checkpoint 使用 `GS=32`，其他 group size 会明确报错。
+
+完整测试会先逐元素对比 CPU 参考结果，再运行 QKV microbenchmark，最后对两个模型的 FP32、普通 int8 和 PPU 优化 int8 各测试三次：
+
+```bash
+./gpu/ppu/bench.sh
+```
+
+当前代码已通过 PPU SDK 编译；性能表中的 PPU 优化列需要在加载了 PPU 驱动的 810E 环境运行上述脚本后填写。
+
+## 分步教程
+
+[`gpu_tutorial/`](../gpu_tutorial/README_zh.md) 用八个模块讲解从权重上传到完整 CUDA forward；其中 cuBLAS FP32 路径对应这里的 `default/rungpu.cu`。

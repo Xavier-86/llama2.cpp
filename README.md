@@ -1,4 +1,4 @@
-# llama2.cpp: Minimal LLM Inference in Pure C++ <span style="float: right;"><a href="README_zh.md">中文</a></span>
+# llama2.cpp: Minimal LLM Inference on CPU and GPU <span style="float: right;"><a href="README_zh.md">中文</a></span>
 
 > A learning-oriented Llama 2 inference implementation with both CPU and GPU backends, based on [karpathy/llama2.c](https://github.com/karpathy/llama2.c).
 > The CPU backend provides FP32 and int8 inference in modern C++20. The GPU backend implements the corresponding inference paths with CUDA, using cuBLAS and hand-written kernels. Both backends share the same model format and command-line interface, making it easy to compare their implementations, numerical results, and performance side by side.
@@ -7,7 +7,7 @@
 
 ```
 ├── cpu/                  CPU inference: run.cpp (FP32), runq.cpp (int8), quantize.cpp (converter)
-├── gpu/                  GPU inference: rungpu.cu (FP32), runqgpu.cu (int8) — cuBLAS + hand-written kernels
+├── gpu/                  GPU inference: default, RTX 4080s, and PPU implementations
 ├── models/               weights & tokenizer: stories15M/42M (.bin, FP32), stories*-q32.bin (int8), tokenizer.bin
 ├── cpu_tutorial/         CPU step-by-step tutorial: rebuild the whole pipeline in 12 verifiable modules
 ├── gpu_tutorial/         GPU step-by-step tutorial: port the forward pass to CUDA in 8 modules
@@ -38,6 +38,8 @@ c++ -O3 -std=c++17 -o cpu/quantize cpu/quantize.cpp # quantization converter
 ```
 
 When generation finishes, stderr prints `achieved tok/s`, which you can use to compare FP32 vs int8 speed.
+
+For GPU builds and CPU/GPU performance comparisons, see [gpu/README.md](gpu/README.md). The GPU code provides a default implementation plus dedicated RTX 4080 SUPER and Zhenwu 810E PPU int8 kernels.
 
 ## Documentation
 

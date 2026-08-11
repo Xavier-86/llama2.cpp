@@ -1,4 +1,4 @@
-# llama2.cpp：纯 C++ 最小 LLM 推理 <span style="float: right;"><a href="README.md">English</a></span>
+# llama2.cpp：极简 CPU 与 GPU LLM 推理 <span style="float: right;"><a href="README.md">English</a></span>
 
 > 一个面向学习的 Llama 2 推理实现，基于 [karpathy/llama2.c](https://github.com/karpathy/llama2.c) 开发。
 > 项目包含 CPU 与 GPU 两套实现：CPU 版本使用现代 C++20 编写，支持 FP32 和 int8 推理；GPU 版本基于 CUDA，通过 cuBLAS 与手写 kernel 实现完整推理流程。两套实现采用统一的模型格式和命令行接口，方便对照阅读源码、验证数值一致性，并比较两者的推理性能。
@@ -7,7 +7,7 @@
 
 ```
 ├── cpu/                  CPU 推理：run.cpp（FP32）、runq.cpp（int8）、quantize.cpp（转换工具）
-├── gpu/                  GPU 推理：rungpu.cu（FP32）、runqgpu.cu（int8）——cuBLAS + 手写 kernel
+├── gpu/                  GPU 推理：预设、RTX 4080s 与 PPU 三套实现
 ├── models/               权重与分词器：stories15M/42M（.bin，FP32）、stories*-q32.bin（int8）、tokenizer.bin
 ├── cpu_tutorial/         CPU 分步教程：用 12 个可验证模块亲手重建完整推理流程
 ├── gpu_tutorial/         GPU 分步教程：用 8 个模块把 forward 移植到 CUDA
@@ -38,6 +38,8 @@ c++ -O3 -std=c++17 -o cpu/quantize cpu/quantize.cpp # 量化转换工具
 ```
 
 生成结束后 stderr 会打印 `achieved tok/s`，可用于对比 FP32 与 int8 的速度差异。
+
+GPU 编译方法及 CPU/GPU 性能对比见 [gpu/README_zh.md](gpu/README_zh.md)。GPU 代码包含预设实现，以及分别面向 RTX 4080 SUPER 和真武 810E PPU 的 int8 kernel。
 
 ## 文档
 

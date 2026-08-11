@@ -4,6 +4,11 @@ runcpp*
 runqcpp*
 rungpu*
 runqgpu*
+!gpu/default/runqgpu_impl.cuh
+!gpu/default/rungpu.cu
+!gpu/default/runqgpu.cu
+!gpu/4080s/runqgpu.cu
+!gpu/ppu/runqgpu.cu
 quantize
 
 # debug symbols
