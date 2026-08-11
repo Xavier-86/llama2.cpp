@@ -51,8 +51,8 @@ nvcc -O3 -std=c++20 -o /tmp/runqgpu-ppu gpu/ppu/runqgpu.cu
 
 | 模型 | FP32 | int8 | PPU 优化 int8 |
 | --- | ---: | ---: | ---: |
-| stories15M | ~1660 tok/s | ~1640 tok/s | 待 PPU 驱动环境实测 |
-| stories42M | ~1136 tok/s | ~944 tok/s | 待 PPU 驱动环境实测 |
+| stories15M | ~1660 tok/s | ~1640 tok/s | ~2317 tok/s |
+| stories42M | ~1136 tok/s | ~944 tok/s | ~1078 tok/s |
 
 PPU 版本针对原融合 kernel 在 810E 上的低效点重新设计：每个 warp 并行处理四个 32 元素量化组，激活只量化一次并复用，Q/K/V 合并为一次 launch，W1/W3 合并为一次 launch，GEMV 使用 `int8x4 + __dp4a`。当前要求 checkpoint 使用 `GS=32`，其他 group size 会明确报错。
 
@@ -62,7 +62,7 @@ PPU 版本针对原融合 kernel 在 810E 上的低效点重新设计：每个 w
 ./gpu/ppu/bench.sh
 ```
 
-当前代码已通过 PPU SDK 编译；性能表中的 PPU 优化列需要在加载了 PPU 驱动的 810E 环境运行上述脚本后填写。
+在真武 810E（驱动 1.3.2-d7f5a2）上实测，PPU 优化 int8 三轮分别为 `2316.67 / 2316.67 / 2316.67 tok/s`（stories15M）和 `1079.30 / 1047.01 / 1108.60 tok/s`（stories42M）；表中填写三轮均值。kernel 正确性测试通过，Q/K/V/W1/W3 投影相对 CPU 参考的最大绝对误差为 `4.76837e-06`；QKV microbenchmark 从 `18.53 us` 降至 `3.95 us`，加速 `4.69x`。
 
 ## 分步教程
 

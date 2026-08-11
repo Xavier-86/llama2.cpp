@@ -51,8 +51,8 @@ nvcc -O3 -std=c++20 -o /tmp/runqgpu-ppu gpu/ppu/runqgpu.cu
 
 | Model | FP32 | int8 | PPU optimized int8 |
 | --- | ---: | ---: | ---: |
-| stories15M | ~1660 tok/s | ~1640 tok/s | pending a PPU driver-enabled run |
-| stories42M | ~1136 tok/s | ~944 tok/s | pending a PPU driver-enabled run |
+| stories15M | ~1660 tok/s | ~1640 tok/s | ~2317 tok/s |
+| stories42M | ~1136 tok/s | ~944 tok/s | ~1078 tok/s |
 
 The PPU implementation addresses the original fused kernel's weak points on the 810E: each warp handles four 32-element quantization groups, activations are quantized once and reused, Q/K/V share one launch, W1/W3 share one launch, and GEMV uses `int8x4 + __dp4a`. It currently requires a checkpoint with `GS=32` and rejects other group sizes explicitly.
 
@@ -62,7 +62,7 @@ The complete test first compares results element-by-element against a CPU refere
 ./gpu/ppu/bench.sh
 ```
 
-The code has passed compilation with the PPU SDK. Run the script on a driver-enabled 810E system to populate the PPU-optimized performance column.
+Measured on a Zhenwu 810E (driver 1.3.2-d7f5a2), the three PPU-optimized int8 runs achieved `2316.67 / 2316.67 / 2316.67 tok/s` for stories15M and `1079.30 / 1047.01 / 1108.60 tok/s` for stories42M; the table reports their means. The kernel correctness test passed, with a maximum absolute error of `4.76837e-06` against the CPU reference for the Q/K/V/W1/W3 projections. The QKV microbenchmark dropped from `18.53 us` to `3.95 us`, a `4.69x` speedup.
 
 ## Tutorial
 
