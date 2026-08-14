@@ -86,6 +86,16 @@ void check_close(const std::vector<float>& got, const std::vector<float>& expect
     if (max_rel > 2e-5f) throw std::runtime_error(std::string(label) + " mismatch");
 }
 
+void check_quantized(const std::vector<int8_t>& got_q,
+                     const std::vector<float>& got_s,
+                     const std::vector<int8_t>& expected_q,
+                     const std::vector<float>& expected_s,
+                     const char* label) {
+    if (got_q != expected_q)
+        throw std::runtime_error(std::string(label) + " values mismatch");
+    check_close(got_s, expected_s, label);
+}
+
 float benchmark_triple(bool ppu, int iterations,
                        float* y0, float* y1, float* y2,
                        const float* x, int8_t* xq, float* xs,
@@ -186,6 +196,51 @@ int main(int argc, char** argv) {
         CUDA_CHECK(cudaMemcpy(got1.data(), dy1, got1.size() * sizeof(float), cudaMemcpyDeviceToHost));
         check_close(got0, t.expected, "W1 projection");
         check_close(got1, t.expected, "W3 projection");
+
+        // The fused producer/quantizer kernels must match the old two-launch
+        // sequences exactly, including a partial four-group tile.
+        float *dweight = nullptr, *dtmp = nullptr, *dtmp_s = nullptr;
+        int8_t* dtmp_q = nullptr;
+        CUDA_CHECK(cudaMalloc(&dweight, t.n * sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&dtmp, t.n * sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&dtmp_q, t.n));
+        CUDA_CHECK(cudaMalloc(&dtmp_s, t.n / 32 * sizeof(float)));
+        CUDA_CHECK(cudaMemcpy(dweight, t.x.data(), t.n * sizeof(float),
+                              cudaMemcpyHostToDevice));
+
+        rmsnorm_kernel<<<1, 256>>>(dtmp, dx, dweight, t.n);
+        quantize_ppu_kernel<<<1, 256>>>(dtmp, dtmp_q, dtmp_s, t.n / 32);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        std::vector<int8_t> expected_q(t.n);
+        std::vector<float> expected_s(t.n / 32);
+        CUDA_CHECK(cudaMemcpy(expected_q.data(), dtmp_q, t.n, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(expected_s.data(), dtmp_s, expected_s.size() * sizeof(float),
+                              cudaMemcpyDeviceToHost));
+        rmsnorm_quantize_ppu_kernel<<<1, 256>>>(dx, dweight, dxq, dxs, t.n);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaMemcpy(got_xq.data(), dxq, t.n, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(got_xs.data(), dxs, got_xs.size() * sizeof(float),
+                              cudaMemcpyDeviceToHost));
+        check_quantized(got_xq, got_xs, expected_q, expected_s,
+                        "fused RMSNorm+quantize");
+
+        CUDA_CHECK(cudaMemcpy(dtmp, t.x.data(), t.n * sizeof(float),
+                              cudaMemcpyHostToDevice));
+        swiglu_kernel<<<(t.n + 255) / 256, 256>>>(dtmp, dweight, t.n);
+        quantize_ppu_kernel<<<1, 256>>>(dtmp, dtmp_q, dtmp_s, t.n / 32);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaMemcpy(expected_q.data(), dtmp_q, t.n, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(expected_s.data(), dtmp_s, expected_s.size() * sizeof(float),
+                              cudaMemcpyDeviceToHost));
+        swiglu_quantize_ppu_kernel<<<1, 256>>>(dx, dweight, dxq, dxs, t.n / 32);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaMemcpy(got_xq.data(), dxq, t.n, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(got_xs.data(), dxs, got_xs.size() * sizeof(float),
+                              cudaMemcpyDeviceToHost));
+        check_quantized(got_xq, got_xs, expected_q, expected_s,
+                        "fused SwiGLU+quantize");
+
+        cudaFree(dweight); cudaFree(dtmp); cudaFree(dtmp_q); cudaFree(dtmp_s);
 
         const float fused_us = benchmark_triple(false, iterations, dy0, dy1, dy2,
                                                 dx, dxq, dxs, dwq, dws, t.n, t.d);

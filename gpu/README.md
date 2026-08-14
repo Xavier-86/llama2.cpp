@@ -54,7 +54,14 @@ nvcc -O3 -std=c++20 -o /tmp/runqgpu-ppu gpu/ppu/runqgpu.cu
 | stories15M | ~1660 tok/s | ~1640 tok/s | ~2317 tok/s |
 | stories42M | ~1136 tok/s | ~944 tok/s | ~1078 tok/s |
 
-The PPU implementation addresses the original fused kernel's weak points on the 810E: each warp handles four 32-element quantization groups, activations are quantized once and reused, Q/K/V share one launch, W1/W3 share one launch, and GEMV uses `int8x4 + __dp4a`. It currently requires a checkpoint with `GS=32` and rejects other group sizes explicitly.
+The PPU implementation addresses the original fused kernel's weak points on the 810E: each warp handles four 32-element quantization groups, activations are quantized once and reused, Q/K/V share one launch, W1/W3 share one launch, and GEMV uses `int8x4 + __dp4a`. RMSNorm and SwiGLU directly produce quantized activations instead of writing an intermediate fp32 vector and launching a separate quantizer, removing three more launches per layer. It currently requires a checkpoint with `GS=32` and rejects other group sizes explicitly.
+
+Three before/after runs on the same 810E, with identical compiler flags and the decode parameters above, produced these means:
+
+| Model | Before fusion | Fused RMSNorm/SwiGLU | Speedup |
+| --- | ---: | ---: | ---: |
+| stories15M | 2291 tok/s | 2330 tok/s | 1.7% |
+| stories42M | 1244 tok/s | 1283 tok/s | 3.1% |
 
 The complete test first compares results element-by-element against a CPU reference, runs a QKV microbenchmark, then performs three end-to-end runs of FP32, ordinary int8, and PPU-optimized int8 on both models:
 
@@ -62,7 +69,7 @@ The complete test first compares results element-by-element against a CPU refere
 ./gpu/ppu/bench.sh
 ```
 
-Measured on a Zhenwu 810E (driver 1.3.2-d7f5a2), the three PPU-optimized int8 runs achieved `2316.67 / 2316.67 / 2316.67 tok/s` for stories15M and `1079.30 / 1047.01 / 1108.60 tok/s` for stories42M; the table reports their means. The kernel correctness test passed, with a maximum absolute error of `4.76837e-06` against the CPU reference for the Q/K/V/W1/W3 projections. The QKV microbenchmark dropped from `18.53 us` to `3.95 us`, a `4.69x` speedup.
+An earlier version measured on a Zhenwu 810E (driver 1.3.2-d7f5a2) achieved `2316.67 / 2316.67 / 2316.67 tok/s` for stories15M and `1079.30 / 1047.01 / 1108.60 tok/s` for stories42M; the top comparison table retains those historical results. The kernel correctness test reported a maximum absolute error of `4.76837e-06` against the CPU reference for the Q/K/V/W1/W3 projections; the fused RMSNorm/quantization and SwiGLU/quantization paths are also checked element by element against their original two-kernel sequences. The QKV microbenchmark dropped from `18.53 us` to `3.95 us`, a `4.69x` speedup.
 
 ## Tutorial
 

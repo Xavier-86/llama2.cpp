@@ -14,7 +14,8 @@
 //            reductions, __dp4a products, no separate quantize launch.
 //   ppu    — quantize an activation once and reuse it, then run a vectorized
 //            warp-per-row __dp4a GEMV. Q/K/V and W1/W3 are issued as one
-//            kernel each to reduce launch overhead on Zhenwu 810E.
+//            kernel each; RMSNorm/SwiGLU directly emit quantized activations
+//            to reduce launch overhead and fp32 traffic on Zhenwu 810E.
 //
 // Build an entry point from one of the three target directories; see README.md.
 // Run:    ./runqgpu models/stories15M-q32.bin -t 0.0 -n 128 -s 42 -i "Once upon a time"
@@ -293,6 +294,102 @@ __global__ void quantize_ppu_kernel(const float* x, int8_t* xq, float* xs,
     }
 }
 
+// Fuse producer + quantization for the two PPU activations that are consumed
+// only by an int8 GEMV.  Besides removing a launch, these kernels avoid writing
+// an fp32 intermediate and immediately reading it back in quantize_ppu_kernel.
+__global__ void rmsnorm_quantize_ppu_kernel(
+        const float* x, const float* weight, int8_t* xq, float* xs, int n) {
+    __shared__ float sdata[256];
+    const int tid = threadIdx.x;
+    float acc = 0.0f;
+    for (int i = tid; i < n; i += blockDim.x) acc += x[i] * x[i];
+    sdata[tid] = acc;
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) sdata[tid] += sdata[tid + stride];
+        __syncthreads();
+    }
+    const float norm_scale = rsqrtf(sdata[0] / n + 1e-5f);
+
+    const int lane = tid % 32;
+    const int warp = tid / 32;
+    const int subgroup = lane / 8;
+    const int pack = lane % 8;
+    const int ngroups = n / 32;
+    constexpr int groups_per_block = (256 / 32) * 4;
+    for (int group0 = warp * 4; group0 < ngroups;
+         group0 += groups_per_block) {
+        const int group = group0 + subgroup;
+        const bool active = group < ngroups;
+        const size_t off = (size_t)group * 32 + pack * 4;
+        const float4 xv = active
+            ? *reinterpret_cast<const float4*>(x + off)
+            : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        const float4 wv = active
+            ? *reinterpret_cast<const float4*>(weight + off)
+            : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        const float4 v = make_float4(wv.x * xv.x * norm_scale,
+                                     wv.y * xv.y * norm_scale,
+                                     wv.z * xv.z * norm_scale,
+                                     wv.w * xv.w * norm_scale);
+        float wmax = fmaxf(fmaxf(fabsf(v.x), fabsf(v.y)),
+                           fmaxf(fabsf(v.z), fabsf(v.w)));
+        for (int delta = 4; delta > 0; delta >>= 1)
+            wmax = fmaxf(wmax, __shfl_xor_sync(0xffffffffu, wmax, delta));
+        const float scale = wmax / 127.0f;
+        const float inv_scale = wmax > 0.0f ? 127.0f / wmax : 0.0f;
+        const int q0 = __float2int_rn(v.x * inv_scale);
+        const int q1 = __float2int_rn(v.y * inv_scale);
+        const int q2 = __float2int_rn(v.z * inv_scale);
+        const int q3 = __float2int_rn(v.w * inv_scale);
+        const int qpack = (q0 & 0xff) | ((q1 & 0xff) << 8) |
+                          ((q2 & 0xff) << 16) | ((q3 & 0xff) << 24);
+        if (active) {
+            *reinterpret_cast<int*>(xq + off) = qpack;
+            if (pack == 0) xs[group] = scale;
+        }
+    }
+}
+
+__global__ void swiglu_quantize_ppu_kernel(
+        const float* hb, const float* hb2, int8_t* xq, float* xs,
+        int ngroups) {
+    const int lane = threadIdx.x % 32;
+    const int warp = blockIdx.x * (blockDim.x / 32) + threadIdx.x / 32;
+    const int subgroup = lane / 8;
+    const int pack = lane % 8;
+    const int group = warp * 4 + subgroup;
+    const bool active = group < ngroups;
+
+    const size_t off = (size_t)group * 32 + pack * 4;
+    const float4 a = active
+        ? *reinterpret_cast<const float4*>(hb + off)
+        : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    const float4 b = active
+        ? *reinterpret_cast<const float4*>(hb2 + off)
+        : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    const float4 v = make_float4(a.x / (1.0f + expf(-a.x)) * b.x,
+                                 a.y / (1.0f + expf(-a.y)) * b.y,
+                                 a.z / (1.0f + expf(-a.z)) * b.z,
+                                 a.w / (1.0f + expf(-a.w)) * b.w);
+    float wmax = fmaxf(fmaxf(fabsf(v.x), fabsf(v.y)),
+                       fmaxf(fabsf(v.z), fabsf(v.w)));
+    for (int delta = 4; delta > 0; delta >>= 1)
+        wmax = fmaxf(wmax, __shfl_xor_sync(0xffffffffu, wmax, delta));
+    const float scale = wmax / 127.0f;
+    const float inv_scale = wmax > 0.0f ? 127.0f / wmax : 0.0f;
+    const int q0 = __float2int_rn(v.x * inv_scale);
+    const int q1 = __float2int_rn(v.y * inv_scale);
+    const int q2 = __float2int_rn(v.z * inv_scale);
+    const int q3 = __float2int_rn(v.w * inv_scale);
+    const int qpack = (q0 & 0xff) | ((q1 & 0xff) << 8) |
+                      ((q2 & 0xff) << 16) | ((q3 & 0xff) << 24);
+    if (active) {
+        *reinterpret_cast<int*>(xq + off) = qpack;
+        if (pack == 0) xs[group] = scale;
+    }
+}
+
 // PPU path step 2: one warp computes one row from an already-quantized
 // activation. Four 8-lane subgroups consume four quantization groups in
 // parallel; int8x4 loads are coalesced and __dp4a performs four products per
@@ -507,6 +604,21 @@ public:
                               threads>>>(x, xq, xs, ngroups);
     }
 
+    void rmsnorm_quantize_ppu(const float* x, const float* weight,
+                              int8_t* xq, float* xs, int n) {
+        rmsnorm_quantize_ppu_kernel<<<1, 256>>>(x, weight, xq, xs, n);
+    }
+
+    void swiglu_quantize_ppu(const float* hb, const float* hb2,
+                             int8_t* xq, float* xs, int n) {
+        constexpr int threads = 256;
+        constexpr int groups_per_block = (threads / 32) * 4;
+        const int ngroups = n / 32;
+        swiglu_quantize_ppu_kernel<<<
+            (ngroups + groups_per_block - 1) / groups_per_block, threads>>>(
+                hb, hb2, xq, xs, ngroups);
+    }
+
     void qmatmul_ppu(float* y, const int8_t* xq, const float* xs,
                      const DeviceQuantizedTensor& w, int n, int d) {
         constexpr int warps_per_block = 8;
@@ -552,12 +664,15 @@ public:
             float* k = ds_.key_cache + loff + (size_t)pos * kvd;
             float* v = ds_.value_cache + loff + (size_t)pos * kvd;
 
-            rmsnorm_kernel<<<1, 256>>>(ds_.xb, ds_.x, dw_.rms_att_weight + (size_t)l * dim, dim);
             if (kernel_kind_ == KernelKind::Ppu) {
-                quantize_ppu(ds_.xb, ds_.xq_q, ds_.xq_s, dim);
+                rmsnorm_quantize_ppu(ds_.x,
+                    dw_.rms_att_weight + (size_t)l * dim,
+                    ds_.xq_q, ds_.xq_s, dim);
                 qmatmul_ppu_3(ds_.q, dw_.wq[l], dim, k, dw_.wk[l], kvd,
                               v, dw_.wv[l], kvd, ds_.xq_q, ds_.xq_s, dim);
             } else {
+                rmsnorm_kernel<<<1, 256>>>(ds_.xb, ds_.x,
+                    dw_.rms_att_weight + (size_t)l * dim, dim);
                 qmatmul(ds_.q, ds_.xb, ds_.xq_q, ds_.xq_s, dw_.wq[l], dim, dim);
                 qmatmul(k, ds_.xb, ds_.xq_q, ds_.xq_s, dw_.wk[l], dim, kvd);
                 qmatmul(v, ds_.xb, ds_.xq_q, ds_.xq_s, dw_.wv[l], dim, kvd);
@@ -574,31 +689,38 @@ public:
             }
             add_kernel<<<(dim + 255) / 256, 256>>>(ds_.x, ds_.xb2, dim);
 
-            rmsnorm_kernel<<<1, 256>>>(ds_.xb, ds_.x, dw_.rms_ffn_weight + (size_t)l * dim, dim);
             if (kernel_kind_ == KernelKind::Ppu) {
-                quantize_ppu(ds_.xb, ds_.xq_q, ds_.xq_s, dim);
+                rmsnorm_quantize_ppu(ds_.x,
+                    dw_.rms_ffn_weight + (size_t)l * dim,
+                    ds_.xq_q, ds_.xq_s, dim);
                 qmatmul_ppu_2(ds_.hb, dw_.w1[l], hidden_dim,
                               ds_.hb2, dw_.w3[l], hidden_dim,
                               ds_.xq_q, ds_.xq_s, dim);
             } else {
+                rmsnorm_kernel<<<1, 256>>>(ds_.xb, ds_.x,
+                    dw_.rms_ffn_weight + (size_t)l * dim, dim);
                 qmatmul(ds_.hb, ds_.xb, ds_.xq_q, ds_.xq_s, dw_.w1[l], dim, hidden_dim);
                 qmatmul(ds_.hb2, ds_.xb, ds_.xq_q, ds_.xq_s, dw_.w3[l], dim, hidden_dim);
             }
-            swiglu_kernel<<<(hidden_dim + 255) / 256, 256>>>(ds_.hb, ds_.hb2, hidden_dim);
             if (kernel_kind_ == KernelKind::Ppu) {
-                quantize_ppu(ds_.hb, ds_.hq_q, ds_.hq_s, hidden_dim);
+                swiglu_quantize_ppu(ds_.hb, ds_.hb2,
+                                    ds_.hq_q, ds_.hq_s, hidden_dim);
                 qmatmul_ppu(ds_.xb, ds_.hq_q, ds_.hq_s, dw_.w2[l], hidden_dim, dim);
             } else {
+                swiglu_kernel<<<(hidden_dim + 255) / 256, 256>>>(
+                    ds_.hb, ds_.hb2, hidden_dim);
                 qmatmul(ds_.xb, ds_.hb, ds_.hq_q, ds_.hq_s, dw_.w2[l], hidden_dim, dim);
             }
             add_kernel<<<(dim + 255) / 256, 256>>>(ds_.x, ds_.xb, dim);
         }
 
-        rmsnorm_kernel<<<1, 256>>>(ds_.x, ds_.x, dw_.rms_final_weight, dim);
         if (kernel_kind_ == KernelKind::Ppu) {
-            quantize_ppu(ds_.x, ds_.xq_q, ds_.xq_s, dim);
+            rmsnorm_quantize_ppu(ds_.x, dw_.rms_final_weight,
+                                 ds_.xq_q, ds_.xq_s, dim);
             qmatmul_ppu(ds_.logits, ds_.xq_q, ds_.xq_s, dw_.wcls, dim, p.vocab_size);
         } else {
+            rmsnorm_kernel<<<1, 256>>>(ds_.x, ds_.x,
+                                      dw_.rms_final_weight, dim);
             qmatmul(ds_.logits, ds_.x, ds_.xq_q, ds_.xq_s, dw_.wcls, dim, p.vocab_size);
         }
 

@@ -54,7 +54,14 @@ nvcc -O3 -std=c++20 -o /tmp/runqgpu-ppu gpu/ppu/runqgpu.cu
 | stories15M | ~1660 tok/s | ~1640 tok/s | ~2317 tok/s |
 | stories42M | ~1136 tok/s | ~944 tok/s | ~1078 tok/s |
 
-PPU 版本针对原融合 kernel 在 810E 上的低效点重新设计：每个 warp 并行处理四个 32 元素量化组，激活只量化一次并复用，Q/K/V 合并为一次 launch，W1/W3 合并为一次 launch，GEMV 使用 `int8x4 + __dp4a`。当前要求 checkpoint 使用 `GS=32`，其他 group size 会明确报错。
+PPU 版本针对原融合 kernel 在 810E 上的低效点重新设计：每个 warp 并行处理四个 32 元素量化组，激活只量化一次并复用，Q/K/V 合并为一次 launch，W1/W3 合并为一次 launch，GEMV 使用 `int8x4 + __dp4a`。RMSNorm 和 SwiGLU 会直接生成量化激活，不再把中间 FP32 向量写回后另起量化 kernel；每层由此再减少 3 次 launch。当前要求 checkpoint 使用 `GS=32`，其他 group size 会明确报错。
+
+融合前后在同一台 810E、相同编译参数及上述 decode 参数下各跑三轮，平均结果如下：
+
+| 模型 | 融合前 | RMSNorm/SwiGLU 融合后 | 提升 |
+| --- | ---: | ---: | ---: |
+| stories15M | 2291 tok/s | 2330 tok/s | 1.7% |
+| stories42M | 1244 tok/s | 1283 tok/s | 3.1% |
 
 完整测试会先逐元素对比 CPU 参考结果，再运行 QKV microbenchmark，最后对两个模型的 FP32、普通 int8 和 PPU 优化 int8 各测试三次：
 
@@ -62,7 +69,7 @@ PPU 版本针对原融合 kernel 在 810E 上的低效点重新设计：每个 w
 ./gpu/ppu/bench.sh
 ```
 
-在真武 810E（驱动 1.3.2-d7f5a2）上实测，PPU 优化 int8 三轮分别为 `2316.67 / 2316.67 / 2316.67 tok/s`（stories15M）和 `1079.30 / 1047.01 / 1108.60 tok/s`（stories42M）；表中填写三轮均值。kernel 正确性测试通过，Q/K/V/W1/W3 投影相对 CPU 参考的最大绝对误差为 `4.76837e-06`；QKV microbenchmark 从 `18.53 us` 降至 `3.95 us`，加速 `4.69x`。
+早期版本在真武 810E（驱动 1.3.2-d7f5a2）上的 PPU 优化 int8 三轮结果为 `2316.67 / 2316.67 / 2316.67 tok/s`（stories15M）和 `1079.30 / 1047.01 / 1108.60 tok/s`（stories42M）；顶部对比表沿用这组历史数据。kernel 正确性测试中，Q/K/V/W1/W3 投影相对 CPU 参考的最大绝对误差为 `4.76837e-06`；融合的 RMSNorm/量化与 SwiGLU/量化也会和原两步实现逐元素对拍。QKV microbenchmark 从 `18.53 us` 降至 `3.95 us`，加速 `4.69x`。
 
 ## 分步教程
 
